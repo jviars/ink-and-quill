@@ -13,6 +13,7 @@ import { createEmptyProject } from "@/lib/project-types"
 import { loadProjectZip } from "@/lib/project-io"
 import { loadPreferences, addRecentProject, removeRecentProject, type RecentProject } from "@/lib/user-preferences"
 import { isTauri } from "@/lib/environment"
+import { cn } from "@/lib/utils"
 
 interface WelcomeScreenProps {
   onCreateProject: (project: QuillProject, selectedNodeId?: string | null, filePath?: string | null) => void
@@ -221,7 +222,7 @@ export function WelcomeScreen({ onCreateProject, onOpenProject }: WelcomeScreenP
   }
 
   return (
-    <div className="welcome-shell app-workspace relative min-h-screen overflow-hidden px-5 py-6">
+    <div className={cn("welcome-shell app-workspace relative min-h-screen overflow-hidden px-5 py-6", isTauri && "tauri-desktop")}>
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute -left-28 top-14 h-72 w-72 rounded-full bg-primary/10 blur-3xl" />
         <div className="absolute right-8 top-8 h-56 w-56 rounded-full bg-primary/10 blur-3xl" />

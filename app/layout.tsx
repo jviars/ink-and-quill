@@ -22,7 +22,8 @@ export default function RootLayout({
           defaultTheme="system"
           enableSystem
           disableTransitionOnChange
-          themes={["light", "dark"]}
+          storageKey="ink-and-quill-theme"
+          themes={["light", "dark", "system"]}
         >
           {children}
         </ThemeProvider>

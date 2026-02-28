@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import {
   BoldIcon,
   ItalicIcon,
@@ -52,6 +52,73 @@ const PAPER_MARGIN = 72 // 0.75 inches * 96 DPI
 // Default font size
 const DEFAULT_FONT_SIZE = "16"
 
+type SlashCommandId = "text" | "heading1" | "heading2" | "bulletList" | "orderedList" | "pageBreak"
+
+interface SlashCommand {
+  id: SlashCommandId
+  label: string
+  description: string
+  aliases: string[]
+  icon: typeof Type
+}
+
+interface SlashMenuState {
+  query: string
+  position: {
+    top: number
+    left: number
+  }
+  range: {
+    from: number
+    to: number
+  }
+}
+
+const SLASH_COMMANDS: SlashCommand[] = [
+  {
+    id: "text",
+    label: "Text",
+    description: "Start a normal paragraph.",
+    aliases: ["paragraph", "normal", "body", "p"],
+    icon: Type,
+  },
+  {
+    id: "heading1",
+    label: "Heading 1",
+    description: "Large chapter or section heading.",
+    aliases: ["h1", "title", "chapter"],
+    icon: Heading1,
+  },
+  {
+    id: "heading2",
+    label: "Heading 2",
+    description: "Medium section heading.",
+    aliases: ["h2", "subtitle", "section"],
+    icon: Heading2,
+  },
+  {
+    id: "bulletList",
+    label: "Bullet List",
+    description: "Create a bulleted list.",
+    aliases: ["bullets", "unordered", "ul", "list"],
+    icon: List,
+  },
+  {
+    id: "orderedList",
+    label: "Numbered List",
+    description: "Create a numbered list.",
+    aliases: ["numbered", "ordered", "ol", "list"],
+    icon: ListOrdered,
+  },
+  {
+    id: "pageBreak",
+    label: "Page Break",
+    description: "Insert a hard page break marker.",
+    aliases: ["break", "page", "separator", "hr"],
+    icon: FileBreak,
+  },
+]
+
 export function TiptapEditor({ selectedNode, initialContent, onContentChange }: TiptapEditorProps) {
   const [mounted, setMounted] = useState(false)
   const { resolvedTheme } = useTheme()
@@ -59,7 +126,10 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
   const [papers, setPapers] = useState<number[]>([0]) // Start with one paper
   const [fontSize, setFontSize] = useState<string>(DEFAULT_FONT_SIZE)
   const editorRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
   const [showSaveNotification, setShowSaveNotification] = useState(false)
+  const [slashMenu, setSlashMenu] = useState<SlashMenuState | null>(null)
+  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
 
   useEffect(() => {
     setMounted(true)
@@ -235,6 +305,183 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
     }
   }, [editor])
 
+  const closeSlashMenu = useCallback(() => {
+    setSlashMenu(null)
+    setSlashSelectedIndex(0)
+  }, [])
+
+  const updateSlashMenu = useCallback(() => {
+    if (!editor) return
+
+    const { selection } = editor.state
+
+    if (!selection.empty) {
+      setSlashMenu((prev) => (prev ? null : prev))
+      return
+    }
+
+    const { $from } = selection
+    const textBeforeCursor = $from.parent.textBetween(0, $from.parentOffset, undefined, "\ufffc")
+    const slashIndex = textBeforeCursor.lastIndexOf("/")
+
+    if (slashIndex === -1) {
+      setSlashMenu((prev) => (prev ? null : prev))
+      return
+    }
+
+    const beforeSlash = textBeforeCursor.slice(0, slashIndex)
+    if (beforeSlash.length > 0 && !/\s$/.test(beforeSlash)) {
+      setSlashMenu((prev) => (prev ? null : prev))
+      return
+    }
+
+    const query = textBeforeCursor.slice(slashIndex + 1)
+    if (query.length > 0) {
+      setSlashMenu((prev) => (prev ? null : prev))
+      return
+    }
+    if (!/^[a-zA-Z0-9-]*$/.test(query)) {
+      setSlashMenu((prev) => (prev ? null : prev))
+      return
+    }
+
+    const rangeFrom = selection.from - (textBeforeCursor.length - slashIndex)
+    const anchorPos = Math.min(rangeFrom + 1, selection.from)
+    const coords = editor.view.coordsAtPos(anchorPos)
+    const containerRect = scrollContainerRef.current?.getBoundingClientRect()
+    const scrollTop = scrollContainerRef.current?.scrollTop ?? 0
+    const scrollLeft = scrollContainerRef.current?.scrollLeft ?? 0
+
+    const nextMenuState: SlashMenuState = {
+      query: query.toLowerCase(),
+      position: {
+        top: containerRect ? coords.bottom - containerRect.top + scrollTop + 8 : coords.bottom + scrollTop + 8,
+        left: containerRect ? coords.left - containerRect.left + scrollLeft : coords.left + scrollLeft,
+      },
+      range: {
+        from: rangeFrom,
+        to: selection.from,
+      },
+    }
+
+    setSlashMenu((prev) => {
+      if (
+        prev &&
+        prev.query === nextMenuState.query &&
+        prev.range.from === nextMenuState.range.from &&
+        prev.range.to === nextMenuState.range.to &&
+        prev.position.top === nextMenuState.position.top &&
+        prev.position.left === nextMenuState.position.left
+      ) {
+        return prev
+      }
+      return nextMenuState
+    })
+  }, [editor])
+
+  const filteredSlashCommands = useMemo(() => {
+    return SLASH_COMMANDS
+  }, [])
+
+  const executeSlashCommand = useCallback(
+    (commandId: SlashCommandId) => {
+      if (!editor || !slashMenu) return
+
+      editor.chain().focus().deleteRange(slashMenu.range).run()
+
+      switch (commandId) {
+        case "text":
+          editor.chain().focus().setParagraph().run()
+          break
+        case "heading1":
+          editor.chain().focus().setHeading({ level: 1 }).run()
+          break
+        case "heading2":
+          editor.chain().focus().setHeading({ level: 2 }).run()
+          break
+        case "bulletList":
+          editor.chain().focus().toggleBulletList().run()
+          break
+        case "orderedList":
+          editor.chain().focus().toggleOrderedList().run()
+          break
+        case "pageBreak":
+          ; (editor.chain().focus() as any).setPageBreak().run()
+          break
+      }
+
+      closeSlashMenu()
+      setTimeout(updatePagesBasedOnContent, 0)
+    },
+    [editor, slashMenu, closeSlashMenu],
+  )
+
+  useEffect(() => {
+    if (!editor) return
+
+    const syncSlashMenu = () => updateSlashMenu()
+    const handleBlur = () => setTimeout(closeSlashMenu, 80)
+
+    editor.on("selectionUpdate", syncSlashMenu)
+    editor.on("transaction", syncSlashMenu)
+    editor.on("blur", handleBlur)
+
+    const syncOnViewportChange = () => {
+      if (slashMenu) updateSlashMenu()
+    }
+
+    window.addEventListener("resize", syncOnViewportChange)
+    window.addEventListener("scroll", syncOnViewportChange, true)
+
+    return () => {
+      editor.off("selectionUpdate", syncSlashMenu)
+      editor.off("transaction", syncSlashMenu)
+      editor.off("blur", handleBlur)
+      window.removeEventListener("resize", syncOnViewportChange)
+      window.removeEventListener("scroll", syncOnViewportChange, true)
+    }
+  }, [editor, slashMenu, updateSlashMenu, closeSlashMenu])
+
+  useEffect(() => {
+    if (!slashMenu || !editor) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "ArrowDown") {
+        event.preventDefault()
+        setSlashSelectedIndex((current) => (current + 1) % Math.max(filteredSlashCommands.length, 1))
+        return
+      }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault()
+        setSlashSelectedIndex((current) => (current - 1 + Math.max(filteredSlashCommands.length, 1)) % Math.max(filteredSlashCommands.length, 1))
+        return
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault()
+        closeSlashMenu()
+        return
+      }
+
+      if (event.key === "Enter" || event.key === "Tab") {
+        const selected = filteredSlashCommands[slashSelectedIndex]
+        if (!selected) return
+        event.preventDefault()
+        executeSlashCommand(selected.id)
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown, true)
+    return () => window.removeEventListener("keydown", handleKeyDown, true)
+  }, [slashMenu, slashSelectedIndex, filteredSlashCommands, editor, executeSlashCommand, closeSlashMenu])
+
+  useEffect(() => {
+    if (slashSelectedIndex >= filteredSlashCommands.length) {
+      setSlashSelectedIndex(0)
+    }
+  }, [slashSelectedIndex, filteredSlashCommands.length])
+
   if (!mounted) {
     return null
   }
@@ -258,8 +505,8 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
   const getPaperStyle = () => {
     if (isDark) {
       return {
-        // Keep manuscript paper light in dark mode for readability (Scrivener-like).
-        backgroundColor: "#F8F7F4",
+        // Further dimmed manuscript paper in dark mode for night reading comfort.
+        backgroundColor: "#D9D3C5",
         color: "#1F2124",
         boxShadow: "0 16px 40px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.2)",
         borderRadius: "16px",
@@ -526,7 +773,10 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
             </div>
           </TooltipProvider>
         </div>
-        <div className={`editor-scroll-container flex-1 min-h-0 overflow-auto overflow-x-hidden ${getEditorBackgroundClass()}`}>
+        <div
+          ref={scrollContainerRef}
+          className={`editor-scroll-container relative flex-1 min-h-0 overflow-auto overflow-x-hidden ${getEditorBackgroundClass()}`}
+        >
           <div
             className="editor-wrapper mx-auto my-4 paper-animation"
             style={{
@@ -537,6 +787,64 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
           >
             <EditorContent editor={editor} className="editor" />
           </div>
+          {slashMenu && (
+            <div
+              className={`absolute z-[70] w-[320px] overflow-hidden rounded-xl border shadow-2xl backdrop-blur-xl ${isDark
+                ? "border-white/20 bg-slate-900/90 text-slate-100"
+                : "border-slate-300/90 bg-white/95 text-slate-900"
+                }`}
+              style={{
+                top: slashMenu.position.top,
+                left: slashMenu.position.left,
+              }}
+            >
+              <div
+                className={`border-b px-3 py-2 text-xs uppercase tracking-[0.2em] ${isDark ? "border-white/10 text-slate-300" : "border-slate-200 text-slate-500"}`}
+              >
+                Commands
+              </div>
+              {filteredSlashCommands.length > 0 ? (
+                <div className="max-h-72 overflow-auto p-1.5">
+                  {filteredSlashCommands.map((command, index) => {
+                    const Icon = command.icon
+                    const isSelected = index === slashSelectedIndex
+                    return (
+                      <button
+                        key={command.id}
+                        type="button"
+                        className={`flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${isSelected
+                          ? isDark
+                            ? "bg-white/10"
+                            : "bg-slate-100"
+                          : isDark
+                            ? "hover:bg-white/5"
+                            : "hover:bg-slate-50"
+                          }`}
+                        onMouseDown={(event) => {
+                          event.preventDefault()
+                          executeSlashCommand(command.id)
+                        }}
+                      >
+                        <span
+                          className={`mt-0.5 rounded-md p-1 ${isDark ? "bg-white/10 text-slate-100" : "bg-slate-100 text-slate-700"}`}
+                        >
+                          <Icon className="h-3.5 w-3.5" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-sm font-medium leading-tight">{command.label}</span>
+                          <span className={`mt-0.5 block text-xs ${isDark ? "text-slate-300" : "text-slate-500"}`}>
+                            {command.description}
+                          </span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className={`p-3 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>No matching commands.</div>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex items-center justify-between border-t border-white/10 p-2 text-sm text-muted-foreground">
           <div className="flex items-center space-x-3">

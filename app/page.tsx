@@ -2,8 +2,8 @@
 
 import type React from "react"
 
-import { useState, useEffect, startTransition, useRef } from "react"
-import { List, Settings, FileText, Save, FolderOpen, Pencil, Check, X, LogOut, Printer, Maximize, Minimize } from "lucide-react"
+import { useState, useEffect, useRef } from "react"
+import { List, Settings, FileText, Save, FolderOpen, Pencil, Check, X, Printer, Maximize, Minimize } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { TiptapEditor } from "@/components/tiptap-editor"
 import { Outliner } from "@/components/outliner"
@@ -14,13 +14,11 @@ import { SettingsDialog } from "@/components/settings-dialog"
 import { InkAndQuillLogo } from "@/components/quill-logo"
 import { Input } from "@/components/ui/input"
 import type { QuillProject, DocumentData, TreeNode } from "@/lib/project-types"
-import { WelcomeScreen } from "@/components/welcome-screen"
 import FileSidebar from "@/components/file-sidebar"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
@@ -28,7 +26,7 @@ import {
 import { saveProjectZip, loadProjectZip } from "@/lib/project-io"
 import { saveAs } from "file-saver"
 import { extractCurrentProject, createEmptyProject } from "@/lib/project-types"
-import { loadPreferences, normalizeTheme, updatePreference } from "@/lib/user-preferences"
+import { addRecentProject, loadPreferences, normalizeTheme, updatePreference, type AppTheme } from "@/lib/user-preferences"
 import HTMLToDOCX from "html-to-docx"
 import JSZip from "jszip"
 import { cn } from "@/lib/utils"
@@ -55,6 +53,17 @@ export default function Dashboard() {
   const [fontSize, setFontSize] = useState("16")
   const [isEditingProjectName, setIsEditingProjectName] = useState(false)
   const [editedProjectName, setEditedProjectName] = useState(projectName)
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false)
+  const [isProjectBootstrapComplete, setIsProjectBootstrapComplete] = useState(false)
+  const [startupMessage, setStartupMessage] = useState<string | null>(null)
+  const bootstrappedProjectRef = useRef(false)
+  const lastPersistedThemeRef = useRef<AppTheme | null>(null)
+  const menuActionsRef = useRef({
+    newProject: () => {},
+    openProject: () => {},
+    saveProject: () => {},
+    openSettings: () => {},
+  })
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const clearAutosaveBackup = () => {
@@ -65,77 +74,214 @@ export default function Dashboard() {
 
   // Add this useEffect to load preferences
   useEffect(() => {
-    loadPreferences()
-      .then((prefs) => {
-        // Apply preferences
-        if (prefs.theme) {
-          setTheme(normalizeTheme(prefs.theme))
-        }
+    let cancelled = false
+
+    const hydratePreferences = async () => {
+      try {
+        const prefs = await loadPreferences()
+        if (cancelled) return
+
+        const preferredTheme = normalizeTheme(prefs.theme)
+        setTheme(preferredTheme)
+        lastPersistedThemeRef.current = preferredTheme
+
         if (prefs.fontSize) {
           setFontSize(prefs.fontSize)
         }
-      })
-      .catch((error) => {
+      } catch (error) {
         console.error("Failed to load preferences:", error)
-      })
-  }, []) // Remove setTheme from dependencies to avoid infinite loop
-
-  useEffect(() => {
-    // Initialize treeData with a default structure if it's empty
-    if (!treeData || treeData.length === 0) {
-      const defaultTree = [
-        {
-          id: "root",
-          label: "My Project",
-          type: "folder" as const,
-          children: [],
-        },
-      ]
-      setTreeData(defaultTree)
-    }
-  }, [treeData])
-
-  // Handle creating a new project
-  const handleNewProject = () => {
-    const newProject = createEmptyProject("Untitled Project")
-
-    // Find the Scene 1 document ID to select it by default
-    const findSceneId = (nodes: any[]): string | null => {
-      for (const node of nodes) {
-        if (node.label === "Scene 1" && node.type === "document") {
-          return node.id
-        }
-        if (node.children) {
-          const id = findSceneId(node.children)
-          if (id) return id
+      } finally {
+        if (!cancelled) {
+          setPreferencesLoaded(true)
         }
       }
-      return null
     }
 
-    const sceneId = findSceneId(newProject.treeStructure)
+    hydratePreferences()
 
-    // Update state with the new project
-    setCurrentProject(newProject)
-    setProjectName(newProject.metadata.name)
-    setTreeData(newProject.treeStructure)
-    setDocuments(newProject.documents)
-    setSelectedNode(sceneId)
-    setProjectFilePath(null)
-    clearAutosaveBackup()
+    return () => {
+      cancelled = true
+    }
+  }, [setTheme])
 
-    // Show success notification
+  useEffect(() => {
+    if (!preferencesLoaded || !theme) return
+
+    const normalized = normalizeTheme(theme)
+    if (lastPersistedThemeRef.current === normalized) return
+
+    updatePreference("theme", normalized).catch((error) => {
+      console.error("Failed to persist theme preference:", error)
+    })
+
+    lastPersistedThemeRef.current = normalized
+  }, [preferencesLoaded, theme])
+
+  const showProjectSavedNotification = () => {
     setShowSaveNotification(true)
     setTimeout(() => {
       setShowSaveNotification(false)
     }, 2000)
   }
 
-  // Update the handleOpenProjectFile function
+  const normalizeProjectName = (value: unknown): string => {
+    return typeof value === "string" && value.trim() ? value.trim() : "Untitled Project"
+  }
+
+  const normalizeDialogPath = (selection: unknown): string | null => {
+    if (typeof selection === "string" && selection) return selection
+    if (Array.isArray(selection) && typeof selection[0] === "string" && selection[0]) return selection[0]
+    if (selection && typeof selection === "object") {
+      const maybePath = (selection as { path?: unknown }).path
+      if (typeof maybePath === "string" && maybePath) return maybePath
+    }
+    return null
+  }
+
+  const findPreferredDocumentId = (nodes: TreeNode[]): string | null => {
+    let firstDocument: string | null = null
+
+    const walk = (list: TreeNode[]): boolean => {
+      for (const node of list) {
+        if (node.type === "document") {
+          if (!firstDocument) {
+            firstDocument = node.id
+          }
+          if (node.label === "Scene 1") {
+            firstDocument = node.id
+            return true
+          }
+        }
+
+        if (node.children?.length && walk(node.children)) {
+          return true
+        }
+      }
+
+      return false
+    }
+
+    walk(nodes)
+    return firstDocument
+  }
+
+  const applyProjectToState = (project: QuillProject, filePath: string | null, preferredNodeId?: string | null) => {
+    const safeName = normalizeProjectName(project.metadata?.name)
+    const selectedId = preferredNodeId ?? findPreferredDocumentId(project.treeStructure)
+
+    setCurrentProject({
+      ...project,
+      metadata: {
+        ...project.metadata,
+        name: safeName,
+      },
+    })
+    setProjectName(safeName)
+    setTreeData(project.treeStructure)
+    setDocuments(project.documents || {})
+    setSelectedNode(selectedId)
+    setProjectFilePath(filePath)
+    clearAutosaveBackup()
+
+    if (project.settings.theme) {
+      setTheme(normalizeTheme(project.settings.theme))
+    }
+    if (project.settings.fontSize) {
+      setFontSize(project.settings.fontSize)
+    }
+  }
+
+  const ensureDirectoryExists = async (path: string) => {
+    if (!window.__TAURI__?.fs) return
+    const exists = await window.__TAURI__.fs.exists(path)
+    if (!exists) {
+      await window.__TAURI__.fs.createDir(path, { recursive: true })
+    }
+  }
+
+  const resolveWorkspaceDirectory = async (): Promise<string> => {
+    const prefs = await loadPreferences()
+    const preferredDirectory = prefs.projectDirectory?.trim()
+
+    if (preferredDirectory) {
+      await ensureDirectoryExists(preferredDirectory)
+      return preferredDirectory
+    }
+
+    const appConfigDir = await window.__TAURI__.path.appConfigDir()
+    const workspaceDir = await window.__TAURI__.path.join(appConfigDir, "workspace")
+    await ensureDirectoryExists(workspaceDir)
+    return workspaceDir
+  }
+
+  const createWorkspaceProject = async (name = "Untitled Project"): Promise<{ project: QuillProject; filePath: string }> => {
+    const newProject = createEmptyProject(name)
+    const workspaceDir = await resolveWorkspaceDirectory()
+    const safeName = normalizeProjectName(newProject.metadata.name).replace(/[\\/:*?"<>|]/g, " ").trim() || "Untitled Project"
+
+    let candidatePath = await window.__TAURI__.path.join(workspaceDir, `${safeName}.quill`)
+    let suffix = 2
+    while (await window.__TAURI__.fs.exists(candidatePath)) {
+      candidatePath = await window.__TAURI__.path.join(workspaceDir, `${safeName} ${suffix}.quill`)
+      suffix += 1
+    }
+
+    const zip = new JSZip()
+    zip.file("project.json", JSON.stringify(newProject, null, 2))
+    const zipData = await zip.generateAsync({
+      type: "uint8array",
+      compression: "DEFLATE",
+      compressionOptions: { level: 6 },
+    })
+
+    await window.__TAURI__.fs.writeBinaryFile(candidatePath, zipData)
+    await addRecentProject(newProject.metadata.name, candidatePath)
+    return { project: newProject, filePath: candidatePath }
+  }
+
+  const openProjectFromPath = async (filePath: string) => {
+    if (!window.__TAURI__?.fs) {
+      throw new Error("Native file APIs are unavailable.")
+    }
+
+    const fileContent = await window.__TAURI__.fs.readBinaryFile(filePath)
+    const project = await loadProjectZip(fileContent, filePath)
+    applyProjectToState(project, filePath)
+
+    if (project.settings.theme) {
+      await updatePreference("theme", normalizeTheme(project.settings.theme))
+    }
+    if (project.settings.fontSize) {
+      await updatePreference("fontSize", project.settings.fontSize)
+    }
+  }
+
+  const handleNewProject = async () => {
+    setStartupMessage(null)
+
+    if (isTauri && typeof window !== "undefined" && window.__TAURI__?.fs && window.__TAURI__?.path) {
+      try {
+        const { project, filePath } = await createWorkspaceProject()
+        applyProjectToState(project, filePath)
+        showProjectSavedNotification()
+        return
+      } catch (error) {
+        console.error("Failed to create workspace project:", error)
+      }
+    }
+
+    const newProject = createEmptyProject("Untitled Project")
+    applyProjectToState(newProject, null)
+    showProjectSavedNotification()
+  }
+
   const handleOpenProjectFile = async () => {
     if (isTauri) {
       try {
-        // Use Tauri's dialog API to select a file
+        if (!window.__TAURI__?.dialog?.open || !window.__TAURI__?.fs?.readBinaryFile) {
+          throw new Error("Native dialog APIs are unavailable.")
+        }
+
         const selected = await window.__TAURI__.dialog.open({
           multiple: false,
           filters: [
@@ -146,66 +292,22 @@ export default function Dashboard() {
           ],
         })
 
-        if (selected) {
-          // Read the file using Tauri's fs API
-          const fileContent = await window.__TAURI__.fs.readBinaryFile(selected as string)
+        const selectedPath = normalizeDialogPath(selected)
+        if (!selectedPath) return
 
-          // Load the project from the file content, passing the file path
-          const project = await loadProjectZip(fileContent, selected as string)
-
-          // Find the Scene 1 document ID to select it by default
-          const findSceneId = (nodes: any[]): string | null => {
-            for (const node of nodes) {
-              if (node.label === "Scene 1" && node.type === "document") {
-                return node.id
-              }
-              if (node.children) {
-                const id = findSceneId(node.children)
-                if (id) return id
-              }
-            }
-            return null
-          }
-
-          const sceneId = findSceneId(project.treeStructure)
-
-          // Update state with the loaded project
-          setCurrentProject(project)
-          setProjectName(project.metadata.name)
-          setTreeData(project.treeStructure)
-          setDocuments(project.documents || {})
-          setSelectedNode(sceneId)
-          setProjectFilePath(selected as string)
-          clearAutosaveBackup()
-
-          // Apply project settings
-          if (project.settings.theme) {
-            const normalizedTheme = normalizeTheme(project.settings.theme)
-            setTheme(normalizedTheme)
-            // Update theme preference
-            await updatePreference("theme", normalizedTheme)
-          }
-          if (project.settings.fontSize) {
-            setFontSize(project.settings.fontSize)
-            // Update fontSize preference
-            await updatePreference("fontSize", project.settings.fontSize)
-          }
-
-          // Show success notification
-          setShowSaveNotification(true)
-          setTimeout(() => {
-            setShowSaveNotification(false)
-          }, 2000)
-        }
+        await openProjectFromPath(selectedPath)
+        setStartupMessage(null)
+        showProjectSavedNotification()
       } catch (error) {
         console.error("Failed to open project:", error)
         alert(`Error loading project: ${error instanceof Error ? error.message : "Unknown error"}`)
       }
-    } else {
-      // Fallback for browser environment - use file input
-      if (fileInputRef.current) {
-        fileInputRef.current.click()
-      }
+      return
+    }
+
+    // Fallback for browser environment - use file input
+    if (fileInputRef.current) {
+      fileInputRef.current.click()
     }
   }
 
@@ -215,56 +317,16 @@ export default function Dashboard() {
     if (!file) return
 
     try {
-      // Load the project from the file
       const project = await loadProjectZip(file)
-
-      // Find the Scene 1 document ID to select it by default
-      const findSceneId = (nodes: any[]): string | null => {
-        for (const node of nodes) {
-          if (node.label === "Scene 1" && node.type === "document") {
-            return node.id
-          }
-          if (node.children) {
-            const id = findSceneId(node.children)
-            if (id) return id
-          }
-        }
-        return null
-      }
-
-      const sceneId = findSceneId(project.treeStructure)
-
-      // Update state with the loaded project
-      setCurrentProject(project)
-      setProjectName(project.metadata.name)
-      setTreeData(project.treeStructure)
-      setDocuments(project.documents || {})
-      setSelectedNode(sceneId)
-      // Browsers don't support retaining path references, we rely on indexedDB or manual download
-      setProjectFilePath(null)
-      clearAutosaveBackup()
-
-      // Apply project settings
-      if (project.settings.theme) {
-        setTheme(normalizeTheme(project.settings.theme))
-      }
-      if (project.settings.fontSize) {
-        setFontSize(project.settings.fontSize)
-      }
-
-      // Show success notification
-      setShowSaveNotification(true)
-      setTimeout(() => {
-        setShowSaveNotification(false)
-      }, 2000)
-
-      // Reset the file input
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ""
-      }
+      applyProjectToState(project, null)
+      showProjectSavedNotification()
     } catch (error) {
       console.error("Failed to open project:", error)
       alert(`Error loading project: ${error instanceof Error ? error.message : "Unknown error"}`)
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ""
+      }
     }
   }
 
@@ -272,6 +334,82 @@ export default function Dashboard() {
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  useEffect(() => {
+    if (!preferencesLoaded || bootstrappedProjectRef.current || typeof window === "undefined") return
+    bootstrappedProjectRef.current = true
+
+    let cancelled = false
+
+    const bootstrapProject = async () => {
+      try {
+        const prefs = await loadPreferences()
+        const lastProjectPath =
+          prefs.recentProjects.find((project) => typeof project.path === "string" && project.path && !project.path.startsWith("browser:"))
+            ?.path ?? null
+
+        if (isTauri && window.__TAURI__?.fs && window.__TAURI__?.path) {
+          if (lastProjectPath) {
+            const exists = await window.__TAURI__.fs.exists(lastProjectPath)
+            if (exists) {
+              await openProjectFromPath(lastProjectPath)
+              if (!cancelled) {
+                setStartupMessage(null)
+              }
+              return
+            }
+          }
+
+          const { project, filePath } = await createWorkspaceProject()
+          if (!cancelled) {
+            applyProjectToState(project, filePath)
+            if (lastProjectPath) {
+              setStartupMessage(`Could not find your previously opened project at ${lastProjectPath}. A new workspace project was created.`)
+            } else {
+              setStartupMessage(null)
+            }
+          }
+          return
+        }
+
+        const newProject = createEmptyProject("Untitled Project")
+        if (!cancelled) {
+          applyProjectToState(newProject, null)
+          setStartupMessage(null)
+        }
+      } catch (error) {
+        console.error("Failed to bootstrap project:", error)
+        if (isTauri && window.__TAURI__?.fs && window.__TAURI__?.path) {
+          try {
+            const { project, filePath } = await createWorkspaceProject()
+            if (!cancelled) {
+              applyProjectToState(project, filePath)
+              setStartupMessage("Could not restore your last project. A new workspace project was created instead.")
+            }
+            return
+          } catch (workspaceError) {
+            console.error("Failed to create fallback workspace project:", workspaceError)
+          }
+        }
+
+        const fallbackProject = createEmptyProject("Untitled Project")
+        if (!cancelled) {
+          applyProjectToState(fallbackProject, null)
+          setStartupMessage("Could not restore your last project. A new project has been created instead.")
+        }
+      } finally {
+        if (!cancelled) {
+          setIsProjectBootstrapComplete(true)
+        }
+      }
+    }
+
+    bootstrapProject()
+
+    return () => {
+      cancelled = true
+    }
+  }, [preferencesLoaded])
 
   // Setup auto-save effect
   useEffect(() => {
@@ -285,158 +423,6 @@ export default function Dashboard() {
 
     return () => clearTimeout(timer)
   }, [treeData, documents, theme, fontSize, projectName])
-
-  // Initialize documents only once on mount
-  useEffect(() => {
-    // Only initialize if documents is empty and we haven't already initialized
-    if (Object.keys(documents).length === 0 && !currentProject) {
-      setDocuments({})
-    }
-  }, []) // Empty dependency array ensures this only runs once on mount
-
-  // Add a function to check and create the project directory if it doesn't exist
-  // Add this after the useEffect hooks
-  useEffect(() => {
-    // Check if the preferred project directory exists and create it if needed
-    const checkProjectDirectory = async () => {
-      if (typeof window !== "undefined") {
-        const prefs = await loadPreferences()
-        const preferredDirectory = prefs.projectDirectory
-
-        if (preferredDirectory && isTauri) {
-          try {
-            // Check if directory exists
-            const exists = await window.__TAURI__.fs.exists(preferredDirectory)
-            if (!exists) {
-              // Create directory if it doesn't exist
-              await window.__TAURI__.fs.createDir(preferredDirectory, { recursive: true })
-              console.log(`Created project directory: ${preferredDirectory}`)
-            } else {
-              console.log(`Project directory exists: ${preferredDirectory}`)
-            }
-          } catch (error) {
-            console.error("Error checking/creating project directory:", error)
-          }
-        } else if (preferredDirectory) {
-          console.log("Project directory set to:", preferredDirectory)
-        }
-      }
-    }
-
-    checkProjectDirectory()
-  }, [])
-
-  // Update the handleCreateProject function to accept and use the selectedNodeId parameter
-  const handleCreateProject = (project: QuillProject, selectedNodeId?: string | null, filePath: string | null = null) => {
-    setCurrentProject(project)
-    setProjectName(project.metadata.name)
-    setTreeData(project.treeStructure)
-    setDocuments(project.documents)
-    setProjectFilePath(filePath)
-    clearAutosaveBackup()
-
-    // Apply project settings
-    if (project.settings.theme) {
-      setTheme(normalizeTheme(project.settings.theme))
-    }
-    if (project.settings.fontSize) {
-      setFontSize(project.settings.fontSize)
-    }
-
-    // Select the provided node ID (Scene 1) if available
-    if (selectedNodeId) {
-      setSelectedNode(selectedNodeId)
-    }
-
-    setShowSaveNotification(true)
-    setTimeout(() => {
-      setShowSaveNotification(false)
-    }, 2000)
-  }
-
-  // Update the handleOpenProject function to properly handle recent projects
-  const handleOpenProject = (project: QuillProject, selectedNodeId?: string | null, filePath: string | null = null) => {
-    // Make sure we have a valid tree structure
-    if (!project.treeStructure || !Array.isArray(project.treeStructure) || project.treeStructure.length === 0) {
-      console.error("Invalid tree structure in project:", project)
-      alert("The project file has an invalid structure. Please try another file.")
-      return
-    }
-
-    startTransition(() => {
-      // Set the current project first
-      setCurrentProject(project)
-      setProjectFilePath(filePath)
-      clearAutosaveBackup()
-
-      // Set project name
-      setProjectName(project.metadata.name)
-
-      // Set the tree data - this is critical for the sidebar
-      setTreeData(project.treeStructure)
-
-      // Set documents
-      setDocuments(project.documents || {})
-
-      // Apply project settings
-      if (project.settings.theme) {
-        setTheme(normalizeTheme(project.settings.theme))
-      }
-      if (project.settings.fontSize) {
-        setFontSize(project.settings.fontSize)
-      }
-
-      // If a specific node ID is provided, use it
-      if (selectedNodeId) {
-        setSelectedNode(selectedNodeId)
-      } else {
-        // Otherwise, find Scene 1 or another document to select
-        const findSceneOne = (nodes: TreeNode[]): string | null => {
-          for (const node of nodes) {
-            if (node.label === "Scene 1" && node.type === "document") {
-              return node.id
-            }
-            if (node.children && node.children.length > 0) {
-              const docId = findSceneOne(node.children)
-              if (docId) return docId
-            }
-          }
-          return null
-        }
-
-        // Try to find Scene 1 first
-        const sceneOneId = findSceneOne(project.treeStructure)
-
-        // If Scene 1 is found, select it; otherwise find any document
-        if (sceneOneId) {
-          setSelectedNode(sceneOneId)
-        } else {
-          // Fallback to finding any document
-          const findFirstDocument = (nodes: TreeNode[]): string | null => {
-            for (const node of nodes) {
-              if (node.type === "document") {
-                return node.id
-              }
-              if (node.children && node.children.length > 0) {
-                const docId = findFirstDocument(node.children)
-                if (docId) return docId
-              }
-            }
-            return null
-          }
-
-          const docId = findFirstDocument(project.treeStructure) || project.treeStructure[0]?.id || null
-          setSelectedNode(docId)
-        }
-      }
-    })
-
-    // Show success notification
-    setShowSaveNotification(true)
-    setTimeout(() => {
-      setShowSaveNotification(false)
-    }, 2000)
-  }
 
   // Replace the handleSaveProject function with this updated version
   // isAutoSave flag prevents showing the success notification when saving in the background
@@ -653,9 +639,61 @@ ${compiledContent}
     }
   }
 
-  // If no project is loaded, show the welcome screen
-  if (!currentProject) {
-    return <WelcomeScreen onCreateProject={handleCreateProject} onOpenProject={handleOpenProject} />
+  useEffect(() => {
+    menuActionsRef.current = {
+      newProject: handleNewProject,
+      openProject: () => {
+        void handleOpenProjectFile()
+      },
+      saveProject: () => {
+        void handleSaveProject(false)
+      },
+      openSettings: () => {
+        setSettingsOpen(true)
+      },
+    }
+  }, [handleNewProject, handleOpenProjectFile, handleSaveProject])
+
+  useEffect(() => {
+    if (!isTauri || typeof window === "undefined") return
+
+    const tauriEvent = (window.__TAURI__ as { event?: { listen?: (...args: any[]) => Promise<() => void> } }).event
+    if (!tauriEvent?.listen) return
+
+    let alive = true
+    let unlistenFns: Array<() => void> = []
+
+    const registerMenuListeners = async () => {
+      try {
+        const listen = tauriEvent.listen as (event: string, handler: () => void) => Promise<() => void>
+        const listeners = await Promise.all([
+          listen("menu://new-project", () => menuActionsRef.current.newProject()),
+          listen("menu://open-project", () => menuActionsRef.current.openProject()),
+          listen("menu://save-project", () => menuActionsRef.current.saveProject()),
+          listen("menu://open-settings", () => menuActionsRef.current.openSettings()),
+        ])
+
+        if (!alive) {
+          listeners.forEach((unlisten: () => void) => unlisten())
+          return
+        }
+
+        unlistenFns = listeners
+      } catch (error) {
+        console.error("Failed to register native menu listeners:", error)
+      }
+    }
+
+    registerMenuListeners()
+
+    return () => {
+      alive = false
+      unlistenFns.forEach((unlisten) => unlisten())
+    }
+  }, [])
+
+  if (!preferencesLoaded || !isProjectBootstrapComplete || !currentProject) {
+    return <div className={cn("app-shell app-workspace", isTauri && "tauri-desktop")} />
   }
 
   // Sidebar content
@@ -813,16 +851,6 @@ ${compiledContent}
                         <FolderOpen className="mr-2 h-4 w-4" />
                         <span>Open Project</span>
                       </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        onClick={() => {
-                          setCurrentProject(null)
-                          setProjectFilePath(null)
-                        }}
-                      >
-                        <LogOut className="mr-2 h-4 w-4" />
-                        <span>Return to Welcome Screen</span>
-                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
 
@@ -945,6 +973,12 @@ ${compiledContent}
       {showSaveNotification && (
         <div className="fixed bottom-4 right-4 bg-green-500 text-white px-4 py-2 rounded shadow-lg notification">
           {currentProject ? "Project saved successfully" : "Project created successfully"}
+        </div>
+      )}
+
+      {startupMessage && (
+        <div className="fixed bottom-4 left-4 max-w-[min(640px,calc(100vw-2rem))] rounded border border-amber-400/40 bg-amber-500/20 px-4 py-2 text-sm text-amber-100 shadow-lg">
+          {startupMessage}
         </div>
       )}
 
