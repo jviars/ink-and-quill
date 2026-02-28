@@ -23,6 +23,7 @@ interface TauriWindow {
       readTextFile(path: string): Promise<string>
       readBinaryFile(path: string): Promise<Uint8Array>
       writeTextFile(path: string, contents: string): Promise<void>
+      writeTextFile(options: { path: string; contents: string }): Promise<void>
       writeBinaryFile(path: string, contents: Uint8Array): Promise<void>
       exists(path: string): Promise<boolean>
       createDir(path: string, options?: { recursive?: boolean }): Promise<void>
@@ -32,6 +33,7 @@ interface TauriWindow {
     path: {
       join(...paths: string[]): Promise<string>
       appDir(): Promise<string>
+      appConfigDir(): Promise<string>
       homeDir(): Promise<string>
       documentDir(): Promise<string>
     }

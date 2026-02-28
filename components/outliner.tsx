@@ -1,146 +1,123 @@
 "use client"
 
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { useTheme } from "next-themes"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
-import { useTheme } from "next-themes"
-import type { DocumentData, TreeNode } from "@/lib/project-types"
+import { Textarea } from "@/components/ui/textarea"
+import type { TreeNode, DocumentData } from "@/lib/project-types"
 
 interface OutlinerProps {
   treeData: TreeNode[]
   documents: Record<string, DocumentData>
-  selectedNode: string
-  onNodeSelect: (nodeId: string) => void
+  selectedNode: string | null
+  onNodeSelect: (id: string) => void
   onDocumentUpdate?: (id: string, data: Partial<DocumentData>) => void
 }
 
 export function Outliner({ treeData, documents, selectedNode, onNodeSelect, onDocumentUpdate }: OutlinerProps) {
-  const { theme } = useTheme()
+  const { resolvedTheme } = useTheme()
+  const isDark = resolvedTheme === "dark"
 
-  // Function to recursively extract all document nodes from the tree with their parent information
-  const extractDocumentNodes = (
-    nodes: TreeNode[],
-    parentName = "Main Folder",
-  ): { id: string; title: string; type: string; parent: string }[] => {
-    let result: { id: string; title: string; type: string; parent: string }[] = []
-
-    nodes.forEach((node) => {
+  // Helper to extract all documents from the tree
+  const getAllDocuments = (nodes: TreeNode[]): { node: TreeNode; doc: DocumentData }[] => {
+    let result: { node: TreeNode; doc: DocumentData }[] = []
+    for (const node of nodes) {
       if (node.type === "document") {
-        result.push({ id: node.id, title: node.label, type: node.type, parent: parentName })
+        const docInfo = documents[node.id] || {
+          content: "",
+          synopsis: "",
+          notes: "",
+          status: "to-do",
+          label: "none",
+          wordCount: 0,
+          createdAt: "",
+          lastModified: ""
+        }
+        result.push({ node, doc: docInfo })
       }
-
-      if (node.children && node.children.length > 0) {
-        // Pass the current node's label as the parent name for its children
-        result = [...result, ...extractDocumentNodes(node.children, node.label)]
+      if (node.children) {
+        result = result.concat(getAllDocuments(node.children))
       }
-    })
-
+    }
     return result
   }
 
-  // Get all document nodes with their parent information
-  const documentNodes = extractDocumentNodes(treeData)
+  const allCards = getAllDocuments(treeData)
 
-  // Create outline items from document nodes and documents data
-  const outlineItems = documentNodes.map((node) => {
-    const doc = documents[node.id] || {
-      synopsis: "",
-      status: "to-do",
-      label: "none",
-      wordCount: 0,
-    }
-
-    // Ensure we have a valid wordCount
-    const wordCount =
-      doc.wordCount ||
-      // If document has content but no wordCount, calculate it
-      (doc.content
-        ? doc.content
-          .replace(/<[^>]*>/g, " ")
-          .split(/\s+/)
-          .filter(Boolean).length
-        : 0)
-
-    // Calculate page count based on standard manuscript format (275 words per page)
-    const pageCount = Math.ceil(wordCount / 275)
-
-    return {
-      id: node.id,
-      title: node.title,
-      type: node.type,
-      wordCount: wordCount,
-      pageCount: pageCount,
-      parent: node.parent,
-    }
-  })
-
-  const getTableHeaderClass = () => {
-    if (theme === "muted-elegance") {
-      return "bg-[#4D4D4D] text-[#E3B5A4] border-[#666666]"
-    }
-    return ""
+  const getCardBg = () => {
+    if (isDark) return "bg-slate-900/65 border-white/10 shadow-md"
+    return "bg-white/80 border-slate-200/70 shadow-sm"
   }
 
-  const getTableRowClass = (id: string) => {
-    const baseClass = theme === "muted-elegance" ? "border-[#666666] hover:bg-[#666666]" : ""
-
-    // Add selected state
-    if (id === selectedNode) {
-      return `${baseClass} ${theme === "muted-elegance" ? "bg-[#E3B5A4] bg-opacity-30" : theme === "dark" ? "bg-blue-900" : "bg-blue-100"
-        }`
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "draft":
+        return "bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300"
+      case "revised":
+        return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300"
+      case "final":
+        return "bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300"
+      default:
+        return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300"
     }
+  }
 
-    return baseClass
+  if (allCards.length === 0) {
+    return (
+      <div className="flex h-full min-h-0 flex-col items-center justify-center bg-transparent p-8 text-center text-muted-foreground">
+        <div>
+          <h3 className="text-lg font-medium mb-2">No documents found</h3>
+          <p>Create a document in the sidebar to see it on the corkboard.</p>
+        </div>
+      </div>
+    )
   }
 
   return (
-    <div className="flex flex-col h-full dark:bg-gray-950">
-      <div className={`border-b p-2 ${theme === "muted-elegance" ? "border-[#666666]" : "dark:border-gray-800"}`}>
-        <h2 className="text-lg font-medium dark:text-white">Outliner</h2>
+    <div className="flex h-full min-h-0 flex-col bg-transparent">
+      <div className="z-10 flex items-center justify-between border-b border-white/10 bg-transparent p-4">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Corkboard</h2>
+        <span className="text-xs text-muted-foreground">{allCards.length} Cards</span>
       </div>
-      <ScrollArea className="flex-1">
-        {outlineItems.length > 0 ? (
-          <Table>
-            <TableHeader className={getTableHeaderClass()}>
-              <TableRow>
-                <TableHead className="w-[300px]">Title</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Word Count</TableHead>
-                <TableHead>Page Count</TableHead>
-                <TableHead>Location</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {outlineItems.map((item) => (
-                <TableRow
-                  key={item.id}
-                  className={getTableRowClass(item.id)}
-                  onClick={() => onNodeSelect(item.id)}
-                  style={{ cursor: "pointer" }}
-                >
-                  <TableCell className="font-medium">{item.title}</TableCell>
-                  <TableCell>{item.type}</TableCell>
-                  <TableCell>{item.wordCount}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{item.pageCount}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-sm">{item.parent}</span>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        ) : (
-          <div className="flex flex-col items-center justify-center h-full text-center p-8">
-            <div className={`text-lg font-medium mb-4 ${theme === "muted-elegance" ? "text-[#F0F0F0]" : ""}`}>
-              No documents to display
-            </div>
-            <p className={`text-sm ${theme === "muted-elegance" ? "text-[#E3B5A4]" : "text-gray-500"}`}>
-              Create documents in the binder to see them in the outliner
-            </p>
+      <ScrollArea className="flex-1 min-h-0">
+        <div className="p-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 items-start auto-rows-max">
+            {allCards.map(({ node, doc }) => (
+              <div
+                key={node.id}
+                onClick={() => onNodeSelect(node.id)}
+                className={`flex flex-col rounded-xl border p-4 transition-all duration-200 cursor-pointer ${getCardBg()} ${selectedNode === node.id ? "ring-2 ring-primary ring-offset-2 scale-[1.02]" : "hover:shadow-md hover:scale-[1.01]"
+                  }`}
+              >
+                <div className="flex items-center justify-between mb-3 gap-2">
+                  <h3 className="font-semibold text-base truncate flex-1">{node.label}</h3>
+                  <Badge variant="outline" className={`text-[10px] px-2 py-0 border-none shrink-0 ${getStatusColor(doc.status)}`}>
+                    {doc.status || "to-do"}
+                  </Badge>
+                </div>
+
+                <div className="flex-1 mb-4">
+                  <Textarea
+                    placeholder="Brief synopsis..."
+                    className="w-full min-h-[120px] resize-none border-transparent bg-transparent p-1 shadow-none focus-visible:ring-1 focus-visible:ring-primary/20 placeholder:italic text-sm"
+                    value={doc.synopsis || ""}
+                    onChange={(e) => onDocumentUpdate && onDocumentUpdate(node.id, { synopsis: e.target.value })}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-muted-foreground border-t border-black/5 dark:border-white/5 pt-3">
+                  <div className="flex items-center gap-2">
+                    {doc.label && doc.label !== "none" && (
+                      <span className="truncate max-w-[100px] border rounded px-1.5 py-0.5 bg-black/5 dark:bg-white/5 border-black/10 dark:border-white/10">{doc.label}</span>
+                    )}
+                  </div>
+                  <span>{doc.wordCount || 0} words</span>
+                </div>
+              </div>
+            ))}
           </div>
-        )}
+        </div>
       </ScrollArea>
     </div>
   )

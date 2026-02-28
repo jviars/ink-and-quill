@@ -48,6 +48,10 @@ export interface FileNode {
 // Default empty project
 export const createEmptyProject = (name: string): QuillProject => {
   const now = new Date().toISOString()
+  const manuscriptId = `folder-${Date.now()}`
+  const chapterId = `folder-${Date.now() + 1}`
+  const sceneId = `doc-${Date.now() + 2}`
+
   return {
     metadata: {
       name,
@@ -56,18 +60,49 @@ export const createEmptyProject = (name: string): QuillProject => {
       lastModified: now,
     },
     settings: {
-      theme: "muted-elegance",
-      fontSize: "16px",
+      theme: "system",
+      fontSize: "16",
     },
     treeStructure: [
       {
         id: "root",
         label: "My Project",
         type: "folder",
-        children: [],
+        children: [
+          {
+            id: manuscriptId,
+            label: "Manuscript",
+            type: "folder",
+            children: [
+              {
+                id: chapterId,
+                label: "Chapter 1",
+                type: "folder",
+                children: [
+                  {
+                    id: sceneId,
+                    label: "Scene 1",
+                    type: "document",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
       },
     ],
-    documents: {},
+    documents: {
+      [sceneId]: {
+        content: "",
+        synopsis: "",
+        notes: "",
+        status: "to-do",
+        label: "none",
+        wordCount: 0,
+        createdAt: now,
+        lastModified: now,
+      },
+    },
   }
 }
 

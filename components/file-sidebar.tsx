@@ -65,38 +65,34 @@ function TreeItem({
   onCreateFile: (parentId: string | null) => void
   onCreateFolder: (parentId: string | null) => void
 }) {
-  const { theme } = useTheme()
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver } = useSortable({ id: node.id })
-  const [dropIndicatorVisible, setDropIndicatorVisible] = useState(false)
+  const { resolvedTheme } = useTheme()
+  const { attributes, listeners, setNodeRef, transform, isDragging, isOver } = useSortable({ id: node.id })
+  const isDark = resolvedTheme === "dark"
 
   const getSelectedClass = () => {
     if (selectedNodeId === node.id) {
-      if (theme === "muted-elegance") {
-        return "bg-[#E3B5A4] bg-opacity-30 text-[#F0F0F0]"
-      } else if (theme === "dark") {
-        return "bg-blue-900"
+      if (isDark) {
+        return "bg-primary/20 text-primary font-medium"
       } else {
-        return "bg-blue-100"
+        return "bg-primary/10 text-primary font-medium"
       }
     }
-    return ""
+    return "text-muted-foreground"
   }
 
   const getHoverClass = () => {
-    if (theme === "muted-elegance") {
-      return "hover:bg-[#666666]"
-    } else if (theme === "dark") {
-      return "dark:hover:bg-gray-800"
+    if (selectedNodeId === node.id) return "" // Don't apply hover to selected
+
+    if (isDark) {
+      return "dark:hover:bg-white/5 hover:text-foreground"
     } else {
-      return "hover:bg-gray-100"
+      return "hover:bg-black/5 hover:text-foreground"
     }
   }
 
   const getDragOverClass = () => {
     if (isOver && node.type === "folder") {
-      if (theme === "muted-elegance") {
-        return "bg-[#E3B5A4] bg-opacity-30 border-2 border-dashed border-[#E3B5A4] border-opacity-70"
-      } else if (theme === "dark") {
+      if (isDark) {
         return "bg-blue-900 bg-opacity-30 border-2 border-dashed border-blue-500 border-opacity-70"
       } else {
         return "bg-blue-100 bg-opacity-70 border-2 border-dashed border-blue-300 border-opacity-70"
@@ -127,13 +123,13 @@ function TreeItem({
             {...attributes}
             {...listeners}
             className={cn(
-              "flex items-center rounded-sm px-2 py-1 cursor-pointer",
+              "flex items-center rounded-md mx-2 my-0.5 px-2 py-1.5 cursor-pointer text-sm transition-colors duration-150",
               getHoverClass(),
               getSelectedClass(),
               getDragOverClass(),
               getDragIndicatorClass(),
             )}
-            style={{ paddingLeft: `${depth * 12 + 4}px` }}
+            style={{ paddingLeft: `${depth * 16 + 8}px` }}
             onClick={() => onSelect(node.id)}
           >
             {node.type === "folder" ? (
@@ -161,9 +157,6 @@ function TreeItem({
             )}
 
             <span className="truncate">{node.name}</span>
-            {dropIndicatorVisible && node.type === "folder" && (
-              <span className="ml-2 text-xs text-primary animate-pulse">Drop to move here</span>
-            )}
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
@@ -308,7 +301,7 @@ export default function FileSidebar({
           {
             id: "root",
             name: "My Project",
-            type: "folder",
+            type: "folder" as const,
             parentId: null,
             children: [],
           },
@@ -335,16 +328,30 @@ export default function FileSidebar({
     const [draggedNode] = findNode(tree, active.id as string)
     if (!draggedNode) return
 
-    let newTree = removeNode(tree, active.id as string)
+    // 2. Prevent infinite loops: A folder cannot be dropped into itself or any of its children
+    const isDescendant = (potentialParentId: string, ancestorId: string): boolean => {
+      if (potentialParentId === ancestorId) return true
+      const [parentNode] = findNode(tree, potentialParentId)
+      if (!parentNode || !parentNode.parentId) return false
+      return isDescendant(parentNode.parentId, ancestorId)
+    }
 
-    // 2. If dropped ON a folder, insert into it; else insert at root, above/below
-    const [overNode] = findNode(newTree, over.id as string)
+    const [overNode] = findNode(tree, over.id as string)
     const targetFolderId = overNode?.type === "folder" ? overNode.id : (overNode?.parentId ?? null)
 
+    if (draggedNode.type === "folder" && targetFolderId && isDescendant(targetFolderId, draggedNode.id)) {
+      setMoveNotification("Cannot move a folder into itself")
+      setTimeout(() => setMoveNotification(null), 2000)
+      return
+    }
+
+    let newTree = removeNode(tree, active.id as string)
+
+    // 3. Insert it
     draggedNode.parentId = targetFolderId
     newTree = insertNode(newTree, targetFolderId, draggedNode)
 
-    // 3. Sort the tree to maintain hierarchy and sort folders before files at each level
+    // 4. Sort the tree to maintain hierarchy and sort folders before files at each level
     newTree = sortTreeNodes(newTree)
 
     setTree(newTree)
@@ -362,12 +369,10 @@ export default function FileSidebar({
     }
 
     // Show a notification that the move was successful
-    if (draggedNode) {
-      setMoveNotification(`Moved ${draggedNode.name} successfully`)
-      setTimeout(() => {
-        setMoveNotification(null)
-      }, 2000)
-    }
+    setMoveNotification(`Moved ${draggedNode.name}`)
+    setTimeout(() => {
+      setMoveNotification(null)
+    }, 2000)
   }
 
   // Toggle folder expanded state
@@ -530,32 +535,44 @@ export default function FileSidebar({
   const filteredTree = filterTree(tree || [], searchQuery, documents)
 
   return (
-    <div className="h-full flex flex-col">
-      <header className="flex items-center justify-between p-2 border-b">
-        <h2 className="text-lg font-medium">Project Files</h2>
+    <div className="flex h-full min-h-0 flex-col">
+      <header className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Binder</h2>
         <div className="flex items-center space-x-1">
-          <Button variant="ghost" size="icon" onClick={() => handleCreateFolder(null)} title="New Folder">
-            <Folder className="h-4 w-4" />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="glass-icon-button h-7 w-7"
+            onClick={() => handleCreateFolder(null)}
+            title="New Folder"
+          >
+            <Folder className="h-4 w-4 text-muted-foreground" />
           </Button>
-          <Button variant="ghost" size="icon" onClick={() => handleCreateFile(null)} title="New File">
-            <FileText className="h-4 w-4" />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="glass-icon-button h-7 w-7"
+            onClick={() => handleCreateFile(null)}
+            title="New File"
+          >
+            <FileText className="h-4 w-4 text-muted-foreground" />
           </Button>
         </div>
       </header>
 
-      <div className="p-2 border-b">
+      <div className="px-3 pb-3 pt-3">
         <div className="relative">
-          <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground/70" />
           <Input
             placeholder="Search project..."
-            className="pl-8 h-9"
+            className="h-9 rounded-xl border border-white/10 bg-white/10 pl-9 text-sm transition-all focus-visible:ring-1 focus-visible:ring-primary/40"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 min-h-0 overflow-auto px-1 pb-2">
         <ContextMenu>
           <ContextMenuTrigger className="flex-1 h-full">
             <DndContext
@@ -614,7 +631,7 @@ export default function FileSidebar({
       </div>
 
       {moveNotification && (
-        <div className="fixed bottom-4 right-4 bg-green-500 text-white px-4 py-2 rounded shadow-lg notification">
+        <div className="glass-panel fixed bottom-4 right-4 rounded-xl px-4 py-2 text-sm text-foreground notification">
           {moveNotification}
         </div>
       )}

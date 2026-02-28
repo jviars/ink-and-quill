@@ -34,68 +34,94 @@
 
     --radius: 0.5rem;
 
-    --font-cursive: var(--font-dancing-script), "Dancing Script", cursive;
+    --glass-bg: rgba(255, 255, 255, 0.62);
+    --glass-bg-strong: rgba(255, 255, 255, 0.74);
+    --glass-bg-tauri: rgba(255, 255, 255, 0.82);
+    --glass-border: rgba(255, 255, 255, 0.55);
+    --glass-border-muted: rgba(15, 23, 42, 0.09);
+    --glass-shadow: 0 14px 34px rgba(15, 23, 42, 0.14);
+    --glass-blur: 20px;
+    --workspace-gradient: linear-gradient(180deg, rgba(246, 247, 248, 1), rgba(237, 239, 241, 1));
+
+    --font-dancing-script: "Snell Roundhand", "Brush Script MT", "Segoe Script";
+    --font-cursive: var(--font-dancing-script), cursive;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
+    --background: 226 24% 9%;
     --foreground: 210 40% 98%;
 
-    --card: 222.2 84% 4.9%;
+    --card: 226 20% 12%;
     --card-foreground: 210 40% 98%;
 
-    --popover: 222.2 84% 4.9%;
+    --popover: 226 20% 12%;
     --popover-foreground: 210 40% 98%;
 
     --primary: 210 40% 98%;
     --primary-foreground: 222.2 47.4% 11.2%;
 
-    --secondary: 217.2 32.6% 17.5%;
+    --secondary: 226 16% 17%;
     --secondary-foreground: 210 40% 98%;
 
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
+    --muted: 226 14% 15%;
+    --muted-foreground: 220 12% 72%;
 
-    --accent: 217.2 32.6% 17.5%;
+    --accent: 226 16% 17%;
     --accent-foreground: 210 40% 98%;
 
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
+    --border: 225 13% 24%;
+    --input: 225 13% 24%;
     --ring: 212.7 26.8% 83.9%;
+
+    --glass-bg: rgba(16, 21, 34, 0.52);
+    --glass-bg-strong: rgba(16, 21, 34, 0.7);
+    --glass-bg-tauri: rgba(16, 21, 34, 0.86);
+    --glass-border: rgba(255, 255, 255, 0.16);
+    --glass-border-muted: rgba(255, 255, 255, 0.12);
+    --glass-shadow: 0 16px 40px rgba(0, 0, 0, 0.44);
+    --workspace-gradient: linear-gradient(180deg, rgba(8, 10, 16, 1), rgba(11, 17, 30, 1));
   }
 }
 
 /* Muted Elegance Theme */
 .muted-elegance {
   /* Base colors */
-  --background: 0 0% 34%; /* #565656 */
-  --foreground: 0 0% 95%; /* Light text for readability */
+  --background: 0 0% 34%;
+  /* #565656 */
+  --foreground: 0 0% 95%;
+  /* Light text for readability */
 
   /* Card colors */
-  --card: 0 0% 34%; /* #565656 */
+  --card: 0 0% 34%;
+  /* #565656 */
   --card-foreground: 0 0% 95%;
 
   /* Popover colors */
-  --popover: 0 0% 34%; /* #565656 */
+  --popover: 0 0% 34%;
+  /* #565656 */
   --popover-foreground: 0 0% 95%;
 
   /* Primary colors - terracotta accent */
-  --primary: 17 50% 77%; /* #E3B5A4 */
+  --primary: 17 50% 77%;
+  /* #E3B5A4 */
   --primary-foreground: 0 0% 20%;
 
   /* Secondary colors - slightly lighter gray */
-  --secondary: 0 0% 40%; /* #666666 */
+  --secondary: 0 0% 40%;
+  /* #666666 */
   --secondary-foreground: 0 0% 95%;
 
   /* Muted colors - slightly darker gray */
-  --muted: 0 0% 30%; /* #4D4D4D */
+  --muted: 0 0% 30%;
+  /* #4D4D4D */
   --muted-foreground: 0 0% 80%;
 
   /* Accent colors - terracotta */
-  --accent: 17 50% 77%; /* #E3B5A4 */
+  --accent: 17 50% 77%;
+  /* #E3B5A4 */
   --accent-foreground: 0 0% 20%;
 
   /* Destructive colors */
@@ -105,15 +131,155 @@
   /* Border and input colors */
   --border: 0 0% 40%;
   --input: 0 0% 40%;
-  --ring: 17 50% 77%; /* #E3B5A4 */
+  --ring: 17 50% 77%;
+  /* #E3B5A4 */
+
+  --glass-bg: rgba(77, 77, 77, 0.5);
+  --glass-bg-strong: rgba(77, 77, 77, 0.66);
+  --glass-bg-tauri: rgba(77, 77, 77, 0.82);
+  --glass-border: rgba(227, 181, 164, 0.32);
+  --glass-border-muted: rgba(227, 181, 164, 0.2);
+  --glass-shadow: 0 18px 42px rgba(24, 24, 27, 0.42);
+  --workspace-gradient: linear-gradient(180deg, rgba(89, 89, 89, 1), rgba(78, 78, 78, 1));
 }
 
 @layer base {
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+html,
+body {
+  height: 100%;
+}
+
+.app-shell {
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-workspace {
+  background-image: var(--workspace-gradient);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+.tauri-desktop.app-workspace {
+  background-attachment: scroll;
+}
+
+.welcome-shell {
+  min-height: 100vh;
+}
+
+@supports (height: 100dvh) {
+  .app-shell {
+    height: 100dvh;
+  }
+
+  .welcome-shell {
+    min-height: 100dvh;
+  }
+}
+
+.glass-panel {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+}
+
+.glass-toolbar {
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border);
+  border-radius: 18px;
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+}
+
+.glass-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
+  border: 1px solid var(--glass-border-muted);
+}
+
+.dark .glass-toolbar-group,
+.muted-elegance .glass-toolbar-group {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.glass-icon-button {
+  height: 2rem;
+  width: 2rem;
+  border-radius: 999px;
+  color: hsl(var(--foreground));
+}
+
+.glass-icon-button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.glass-icon-button-active {
+  background: rgba(255, 255, 255, 0.2);
+  box-shadow: inset 0 0 0 1px var(--glass-border-muted);
+}
+
+.glass-segmented {
+  display: inline-flex;
+  gap: 0.2rem;
+  padding: 0.2rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  border: 1px solid var(--glass-border-muted);
+}
+
+.dark .glass-segmented,
+.muted-elegance .glass-segmented {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.glass-pill-title {
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
+.pane-surface {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.dark .pane-surface {
+  background: rgba(3, 8, 18, 0.28);
+}
+
+.muted-elegance .pane-surface {
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.tauri-desktop .glass-panel,
+.tauri-desktop .glass-toolbar {
+  background: var(--glass-bg-tauri);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-panel,
+  .glass-toolbar {
+    background: var(--glass-bg-tauri);
   }
 }
 
@@ -232,7 +398,6 @@
 
 /* Add these styles to improve the editor textarea appearance */
 .editor-content {
-  font-family: "Georgia", serif;
   line-height: 1.6;
   transition: font-size 0.2s ease;
   min-height: 500px;
@@ -245,6 +410,7 @@
     opacity: 0;
     transform: translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -330,14 +496,13 @@
 
 /* Add Tiptap specific styles to globals.css */
 
-/* Tiptap editor styles */
 .ProseMirror {
   padding: 0;
   outline: none;
-  font-family: "Georgia", serif;
-  line-height: 1.6;
+  line-height: 1.8;
   min-height: 500px;
-  font-size: 16px; /* Ensure default font size is 16px */
+  font-size: 16px;
+  /* Ensure default font size is 16px */
 }
 
 .ProseMirror p {
@@ -382,7 +547,8 @@
   pointer-events: none;
   height: 0;
   font-style: italic;
-  opacity: 0.6;
+  opacity: 0.3;
+  /* Softened placeholder opacity */
 }
 
 .ProseMirror .text-left {
@@ -403,17 +569,16 @@
 }
 
 .dark .ProseMirror {
-  color: #e0e0e0;
+  color: #1f2124;
 }
 
-/* Tiptap editor styles for paper display */
 .ProseMirror {
   padding: 0;
   outline: none;
-  font-family: "Georgia", serif;
-  line-height: 1.6;
+  line-height: 1.8;
   min-height: 500px;
-  font-size: 16px; /* Default font size */
+  font-size: 16px;
+  /* Default font size */
 }
 
 .ProseMirror p {
@@ -452,8 +617,9 @@
 
 /* Paper-specific styles */
 .paper {
-  background-color: white;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  background-color: #FAFAFA;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
@@ -471,7 +637,7 @@
 
 /* Fix for Tiptap editor in dark mode */
 .dark .ProseMirror {
-  color: #e0e0e0;
+  color: #1f2124;
 }
 
 .muted-elegance .ProseMirror {
@@ -490,36 +656,45 @@
 .editor-wrapper {
   /* Change from fixed width to max-width for responsiveness */
   max-width: 8.5in;
-  width: 100%; /* Take full width of container up to max-width */
-  margin: 0 auto;
-  overflow-x: hidden; /* Hide horizontal overflow */
-  overflow-y: auto; /* Keep vertical scrolling */
-  border: 1px solid #ddd; /* optional page border */
+  width: 100%;
+  /* margin to make it truly float */
+  margin: 3rem auto;
+  overflow-x: hidden;
+  /* Keep vertical scrolling accessible by relying on container */
+  border: none;
+  /* removed hard border */
 
   /* Theme-specific styling will be applied inline */
 }
 
 /* Update the editor styles to be fully responsive */
 .editor {
-  width: 100%; /* fill the wrapper width */
-  min-height: 11in; /* minimum height of one page */
-  padding: 0.75in; /* page margin */
+  width: 100%;
+  /* fill the wrapper width */
+  min-height: 11in;
+  /* minimum height of one page */
+  padding: 0.75in;
+  /* page margin */
   position: relative;
-  box-sizing: border-box; /* Include padding in width calculation */
+  box-sizing: border-box;
+  /* Include padding in width calculation */
 }
 
 /* Add responsive padding for smaller screens */
 @media (max-width: 8.5in) {
   .editor {
-    padding: 0.5in; /* Smaller padding on small screens */
+    padding: 0.5in;
+    /* Smaller padding on small screens */
   }
 }
 
 /* Make sure content doesn't overflow */
 .ProseMirror {
   max-width: 100%;
-  overflow-wrap: break-word; /* Ensure text wraps instead of overflowing */
-  word-break: break-word; /* Additional word breaking for long content */
+  overflow-wrap: break-word;
+  /* Ensure text wraps instead of overflowing */
+  word-break: break-word;
+  /* Additional word breaking for long content */
 }
 
 /* Style & force breaks at your <hr class="page-break"> */
@@ -545,7 +720,7 @@
 }
 
 /* Create visual separation between pages */
-.page-break + * {
+.page-break+* {
   margin-top: 0.5in;
   padding-top: 0.75in;
   border-top: 1px solid #ddd;
@@ -569,11 +744,11 @@
   border-top-color: #777;
 }
 
-.dark .page-break + * {
+.dark .page-break+* {
   border-top-color: #444;
 }
 
-.muted-elegance .page-break + * {
+.muted-elegance .page-break+* {
   border-top-color: #666666;
 }
 
@@ -602,7 +777,7 @@
 }
 
 /* Add page numbers */
-.page-break + *::before {
+.page-break+*::before {
   content: "Pageless";
   position: absolute;
   bottom: 0.25in;
@@ -617,17 +792,17 @@
   transition: color 0.3s ease, transform 0.3s ease;
 }
 
-.dark .page-break + *::before {
+.dark .page-break+*::before {
   color: #aaa;
 }
 
-.muted-elegance .page-break + *::before {
+.muted-elegance .page-break+*::before {
   color: #e3b5a4;
 }
 
 /* Add a subtle hover effect */
 .editor:hover::before,
-.page-break + *:hover::before {
+.page-break+*:hover::before {
   transform: scale(1.05);
 }
 
@@ -751,6 +926,7 @@ button:not(:disabled):active {
   from {
     opacity: 0;
   }
+
   to {
     opacity: 1;
   }
@@ -761,6 +937,7 @@ button:not(:disabled):active {
     opacity: 0;
     transform: translateY(-10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -772,6 +949,7 @@ button:not(:disabled):active {
     opacity: 0;
     transform: translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -782,9 +960,11 @@ button:not(:disabled):active {
   0% {
     transform: scale(1);
   }
+
   50% {
     transform: scale(1.05);
   }
+
   100% {
     transform: scale(1);
   }
@@ -801,10 +981,12 @@ button:not(:disabled):active {
 }
 
 @keyframes blink {
+
   from,
   to {
     opacity: 1;
   }
+
   50% {
     opacity: 0;
   }
@@ -860,6 +1042,7 @@ button:not(:disabled):active {
     transform: translateY(20px);
     opacity: 0;
   }
+
   to {
     transform: translateY(0);
     opacity: 1;
@@ -870,6 +1053,7 @@ button:not(:disabled):active {
   from {
     opacity: 1;
   }
+
   to {
     opacity: 0;
   }
@@ -885,6 +1069,7 @@ button:not(:disabled):active {
     opacity: 0;
     transform: translateY(5px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -901,6 +1086,7 @@ button:not(:disabled):active {
     opacity: 0;
     transform: scale(0.95);
   }
+
   to {
     opacity: 1;
     transform: scale(1);
@@ -962,7 +1148,8 @@ button:not(:disabled):active {
 
 /* Muted Elegance theme scrollbar */
 .muted-elegance ::-webkit-scrollbar-thumb {
-  background-color: rgba(227, 181, 164, 0.5); /* Terracotta accent color with transparency */
+  background-color: rgba(227, 181, 164, 0.5);
+  /* Terracotta accent color with transparency */
 }
 
 .muted-elegance ::-webkit-scrollbar-thumb:hover {
@@ -1141,9 +1328,11 @@ button:not(:disabled):active {
   0% {
     outline-offset: -2px;
   }
+
   50% {
     outline-offset: -4px;
   }
+
   100% {
     outline-offset: -2px;
   }
@@ -1169,10 +1358,12 @@ button:not(:disabled):active {
     opacity: 0.6;
     height: 2px;
   }
+
   50% {
     opacity: 1;
     height: 3px;
   }
+
   100% {
     opacity: 0.6;
     height: 2px;
@@ -1220,43 +1411,13 @@ button:not(:disabled):active {
   0% {
     box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4);
   }
+
   70% {
     box-shadow: 0 0 0 6px rgba(59, 130, 246, 0);
   }
+
   100% {
     box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
-  }
-}
-\
-.dark @keyframes folderPulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.4);
-  }
-70% {
-box-shadow: 0 0 0 6px rgba(96, 165, 250, 0
-)
-;
-  }
-  100% {
-box-shadow: 0 0 0 0 rgba(96, 165, 250, 0
-)
-;
-  }
-}
-
-.muted-elegance @keyframes folderPulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(227, 181, 164, 0.4);
-  }
-70% {
-box-shadow: 0 0 0 6px rgba(227, 181, 164, 0
-)
-;
-  }
-  100% {
-box-shadow: 0 0 0 0 rgba(227, 181, 164, 0
-)
-;
   }
 }
 
@@ -1312,7 +1473,7 @@ box-shadow: 0 0 0 0 rgba(227, 181, 164, 0
 
 /* Theme-specific placeholder styles */
 .dark .ProseMirror p.is-editor-empty:first-child::before {
-  color: #888;
+  color: #8a867f;
 }
 
 .muted-elegance .ProseMirror p.is-editor-empty:first-child::before {

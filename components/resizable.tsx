@@ -3,7 +3,6 @@
 import type React from "react"
 
 import { useState, useEffect, useRef } from "react"
-import { useTheme } from "next-themes"
 
 interface ResizableSidebarProps {
   children: React.ReactNode
@@ -11,6 +10,7 @@ interface ResizableSidebarProps {
   defaultWidth?: number
   minWidth?: number
   maxWidth?: number
+  isCollapsed?: boolean
 }
 
 export function ResizableSidebar({
@@ -19,11 +19,11 @@ export function ResizableSidebar({
   defaultWidth = 256,
   minWidth = 180,
   maxWidth = 500,
+  isCollapsed = false,
 }: ResizableSidebarProps) {
   const [sidebarWidth, setSidebarWidth] = useState(defaultWidth)
   const [isResizing, setIsResizing] = useState(false)
   const sidebarRef = useRef<HTMLDivElement>(null)
-  const { theme } = useTheme()
 
   // Handle resize logic
   useEffect(() => {
@@ -63,60 +63,39 @@ export function ResizableSidebar({
     }
   }, [isResizing, minWidth, maxWidth])
 
-  // Get the appropriate border color based on theme
-  const getBorderColor = () => {
-    if (theme === "muted-elegance") {
-      return "#666666"
-    } else if (theme === "dark") {
-      return "rgb(31 41 55)" // dark:border-gray-800
-    } else {
-      return "rgb(229 231 235)" // border-gray-200
-    }
-  }
-
-  // Get the appropriate handle color based on theme
-  const getHandleColor = () => {
-    if (theme === "muted-elegance") {
-      return "#E3B5A4"
-    } else if (theme === "dark") {
-      return "rgb(75 85 99)" // dark:bg-gray-600
-    } else {
-      return "rgb(209 213 219)" // bg-gray-300
-    }
-  }
-
   return (
-    <div className="flex flex-1 overflow-hidden">
+    <div className="flex min-h-0 flex-1 overflow-hidden">
       {/* Sidebar */}
       <div
         ref={sidebarRef}
-        className="flex flex-col border-r relative"
+        className="relative flex min-h-0 flex-col overflow-hidden border-r border-white/10 transition-all duration-300 ease-in-out"
         style={{
-          width: `${sidebarWidth}px`,
-          borderColor: getBorderColor(),
+          width: isCollapsed ? "0px" : `${sidebarWidth}px`,
+          opacity: isCollapsed ? 0 : 1,
         }}
       >
-        {sidebarContent}
+        <div className="h-full w-full min-w-0 overflow-hidden">{sidebarContent}</div>
 
         {/* Resize handle */}
-        <div
-          className="absolute top-0 right-0 h-full w-2 cursor-ew-resize flex items-center justify-center hover:bg-opacity-20 z-10"
-          onMouseDown={() => setIsResizing(true)}
-          style={{
-            touchAction: "none",
-          }}
-        >
+        {!isCollapsed && (
           <div
-            className={`h-16 w-1 rounded-full transition-opacity duration-300 ${isResizing ? "opacity-100" : "opacity-30 hover:opacity-100"}`}
+            className="absolute right-0 top-0 z-10 flex h-full w-2 cursor-ew-resize items-center justify-center"
+            onMouseDown={() => setIsResizing(true)}
             style={{
-              backgroundColor: getHandleColor(),
+              touchAction: "none",
             }}
-          />
-        </div>
+          >
+            <div
+              className={`h-16 w-1 rounded-full bg-foreground/35 transition-opacity duration-300 ${
+                isResizing ? "opacity-100" : "opacity-30 hover:opacity-100"
+              }`}
+            />
+          </div>
+        )}
       </div>
 
       {/* Main content */}
-      <div className="flex-1 flex overflow-hidden">{children}</div>
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">{children}</div>
     </div>
   )
 }

@@ -15,23 +15,17 @@ import type { QuillProject } from "./project-types"
 import { addRecentProject, loadPreferences } from "./user-preferences"
 import { isTauri } from "./environment"
 
+export interface SaveProjectResult {
+  success: boolean
+  filePath: string | null
+}
+
 /* ---------- helpers ------------------------------------------------ */
 const toBlob = (data: unknown) => new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })
 
-// Mock for Electron's ipcRenderer - will be empty in browser
-const ipcRenderer = (typeof window !== "undefined" && (window as any).electron?.ipcRenderer) || null
-
-// Add a function to get the preferred project directory
-export function getPreferredProjectDirectory(): string {
-  if (typeof window !== "undefined") {
-    return localStorage.getItem("quill-project-directory") || ""
-  }
-  return ""
-}
-
 /* ---------- public API --------------------------------------------- */
 // Replace the saveProjectZip function with this enhanced version
-export async function saveProjectZip(project: QuillProject) {
+export async function saveProjectZip(project: QuillProject): Promise<SaveProjectResult> {
   project.metadata.lastModified = new Date().toISOString()
 
   const zip = new JSZip()
@@ -80,9 +74,9 @@ export async function saveProjectZip(project: QuillProject) {
         // Add to recent projects
         await addRecentProject(project.metadata.name, fullPath)
 
-        return true
+        return { success: true, filePath: fullPath }
       }
-      return false
+      return { success: false, filePath: null }
     } catch (error) {
       console.error("Failed to save file with Tauri:", error)
       throw error
@@ -100,7 +94,7 @@ export async function saveProjectZip(project: QuillProject) {
     // but we can still add to recent projects with a placeholder path
     await addRecentProject(project.metadata.name, `browser:${project.metadata.name}`)
 
-    return true
+    return { success: true, filePath: null }
   }
 }
 
@@ -120,19 +114,10 @@ export async function selectDirectory(initialPath?: string): Promise<string | nu
       console.error("Failed to open directory dialog:", error)
       return null
     }
-  } else if (ipcRenderer) {
-    try {
-      const result = await ipcRenderer.invoke("select-directory", initialPath)
-      return result || null
-    } catch (error) {
-      console.error("Failed to select directory with Electron:", error)
-      return null
-    }
-  } else {
-    // Fallback for browser environment during development
-    const directory = prompt("Select a directory:", initialPath || "")
-    return directory
   }
+
+  // Browser fallback: no directory picker support here.
+  return null
 }
 
 export async function loadProjectZip(file: File | ArrayBuffer | Uint8Array, filePath?: string): Promise<QuillProject> {
@@ -152,10 +137,6 @@ export async function loadProjectZip(file: File | ArrayBuffer | Uint8Array, file
     }
 
     // TODO: Process any assets/ folder and rehydrate embedded images
-
-    // Add this debugging code at the end of the loadProjectZip function, right before returning the project
-    console.log("Loaded project:", project)
-    console.log("Tree structure:", project.treeStructure)
 
     // Make sure the tree structure is properly validated
     if (!Array.isArray(project.treeStructure) || project.treeStructure.length === 0) {
@@ -193,70 +174,6 @@ export async function loadProjectZip(file: File | ArrayBuffer | Uint8Array, file
     console.error("Error loading project:", error)
     throw new Error(`Failed to load project: ${error instanceof Error ? error.message : "Unknown error"}`)
   }
-}
-
-// Add a function to load a project from recent projects
-export async function loadRecentProject(projectName: string): Promise<QuillProject | null> {
-  if (isTauri) {
-    try {
-      const preferredDirectory = getPreferredProjectDirectory()
-      if (!preferredDirectory) {
-        throw new Error("No preferred directory set")
-      }
-
-      const filePath = `${preferredDirectory}/${projectName}.quill`
-
-      // Check if the file exists
-      const exists = await window.__TAURI__.fs.exists(filePath)
-      if (!exists) {
-        throw new Error(`Project file not found: ${filePath}`)
-      }
-
-      // Read the file using Tauri's fs API
-      const fileContent = await window.__TAURI__.fs.readBinaryFile(filePath)
-
-      // Load the project from the file content
-      return await loadProjectZip(fileContent)
-    } catch (error) {
-      console.error("Failed to load recent project:", error)
-      return null
-    }
-  } else if (ipcRenderer) {
-    // For Electron, we would search for the file in the preferred directory
-    try {
-      const preferredDirectory = getPreferredProjectDirectory()
-      const result = await ipcRenderer.invoke("load-recent-project", projectName, preferredDirectory)
-
-      if (result && result.fileContent) {
-        return await loadProjectZip(result.fileContent)
-      }
-      return null
-    } catch (error) {
-      console.error("Failed to load recent project:", error)
-      return null
-    }
-  } else {
-    // For browser environment, we can't directly load files from disk
-    // We would need to prompt the user to select the file again
-    alert(
-      `In the desktop app, this would load "${projectName}" directly. Please use the Open Project button to select the file manually.`,
-    )
-    return null
-  }
-}
-
-// Add a function to get recent projects
-export function getRecentProjects(): { name: string; lastModified: string }[] {
-  if (typeof window !== "undefined") {
-    try {
-      const savedProjects = localStorage.getItem("ink-and-quill-recent-projects")
-      return savedProjects ? JSON.parse(savedProjects) : []
-    } catch (error) {
-      console.error("Failed to get recent projects:", error)
-      return []
-    }
-  }
-  return []
 }
 
 // Helper function to extract embedded images from TipTap content

@@ -3,86 +3,110 @@
 import type React from "react"
 
 import { useState, useEffect, useRef } from "react"
-import { Button } from "@/components/ui/button"
 import { motion } from "framer-motion"
-import { FolderOpen, FileText, Clock, ArrowRight, Trash2 } from "lucide-react"
+import { FolderOpen, FileText, Clock, RotateCcw, AlertCircle } from "lucide-react"
 import { InkAndQuillLogo } from "@/components/quill-logo"
-import { useTheme } from "next-themes"
-import { Card, CardContent } from "@/components/ui/card"
-import { Separator } from "@/components/ui/separator"
-import type { QuillProject } from "@/lib/project-types"
-import { createEmptyProject } from "@/lib/project-manager"
+import { GlassPanel } from "@/components/glass-ui"
+import { Button } from "@/components/ui/button"
+import type { QuillProject, TreeNode } from "@/lib/project-types"
+import { createEmptyProject } from "@/lib/project-types"
 import { loadProjectZip } from "@/lib/project-io"
-
-// Import the user preferences functions
 import { loadPreferences, addRecentProject, removeRecentProject, type RecentProject } from "@/lib/user-preferences"
 import { isTauri } from "@/lib/environment"
 
 interface WelcomeScreenProps {
-  onCreateProject: (project: QuillProject, selectedNodeId?: string | null) => void
-  onOpenProject: (project: QuillProject, selectedNodeId?: string | null) => void
+  onCreateProject: (project: QuillProject, selectedNodeId?: string | null, filePath?: string | null) => void
+  onOpenProject: (project: QuillProject, selectedNodeId?: string | null, filePath?: string | null) => void
+}
+
+function findPreferredDocumentId(nodes: TreeNode[]): string | null {
+  let firstDoc: string | null = null
+
+  const visit = (list: TreeNode[]): boolean => {
+    for (const node of list) {
+      if (node.type === "document") {
+        if (node.label === "Scene 1") {
+          firstDoc = node.id
+          return true
+        }
+        if (!firstDoc) firstDoc = node.id
+      }
+      if (node.children?.length && visit(node.children)) {
+        return true
+      }
+    }
+    return false
+  }
+
+  visit(nodes)
+  return firstDoc
+}
+
+function isProjectValid(project: QuillProject | null): project is QuillProject {
+  return Boolean(project?.metadata && Array.isArray(project.treeStructure) && project.documents)
 }
 
 export function WelcomeScreen({ onCreateProject, onOpenProject }: WelcomeScreenProps) {
-  const [animationComplete, setAnimationComplete] = useState(false)
+  const [animationReady, setAnimationReady] = useState(false)
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const { theme } = useTheme()
+  const [hasAutosaveBackup, setHasAutosaveBackup] = useState(false)
+  const [backupTimestamp, setBackupTimestamp] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Load recent projects from preferences
   useEffect(() => {
-    const loadRecentProjectsList = async () => {
+    const bootstrap = async () => {
       try {
         const prefs = await loadPreferences()
-        setRecentProjects(prefs.recentProjects)
-      } catch (error) {
-        console.error("Failed to load recent projects:", error)
-        // Don't show error to user, just log it
+        setRecentProjects(prefs.recentProjects || [])
+      } catch (loadError) {
+        console.error("Failed to load recent projects:", loadError)
+      }
+
+      try {
+        const backup = localStorage.getItem("quill-autosave-project")
+        if (!backup) return
+        const parsed = JSON.parse(backup) as QuillProject
+        if (isProjectValid(parsed)) {
+          setHasAutosaveBackup(true)
+          setBackupTimestamp(parsed.metadata?.lastModified || null)
+        }
+      } catch (backupError) {
+        console.error("Failed to parse autosave backup:", backupError)
       }
     }
 
-    loadRecentProjectsList()
-
-    // Start animation after component mounts
-    const timer = setTimeout(() => {
-      setAnimationComplete(true)
-    }, 1000) // Reduced animation time
-
+    bootstrap()
+    const timer = setTimeout(() => setAnimationReady(true), 220)
     return () => clearTimeout(timer)
   }, [])
+
+  const refreshRecentProjects = async () => {
+    try {
+      const prefs = await loadPreferences()
+      setRecentProjects(prefs.recentProjects || [])
+    } catch (loadError) {
+      console.error("Failed to refresh recent projects:", loadError)
+    }
+  }
+
+  const openProjectFromData = async (project: QuillProject, filePath: string | null) => {
+    const selectedNodeId = findPreferredDocumentId(project.treeStructure)
+    onOpenProject(project, selectedNodeId, filePath)
+  }
 
   const handleNewProject = async () => {
     try {
       setIsLoading(true)
       setError(null)
 
-      // Create a new project with default name
       const newProject = createEmptyProject("Untitled Project")
-
-      // Find the Scene 1 document ID to select it by default
-      const findSceneId = (nodes: any[]): string | null => {
-        for (const node of nodes) {
-          if (node.label === "Scene 1" && node.type === "document") {
-            return node.id
-          }
-          if (node.children) {
-            const id = findSceneId(node.children)
-            if (id) return id
-          }
-        }
-        return null
-      }
-
-      // Pass the Scene 1 ID to be selected
-      const sceneId = findSceneId(newProject.treeStructure)
-
-      // Create the project
-      onCreateProject(newProject, sceneId)
-    } catch (error) {
-      console.error("Error creating new project:", error)
-      setError("Failed to create new project. Please try again.")
+      const sceneId = findPreferredDocumentId(newProject.treeStructure)
+      onCreateProject(newProject, sceneId, null)
+    } catch (createError) {
+      console.error("Error creating new project:", createError)
+      setError("Failed to create a new project.")
     } finally {
       setIsLoading(false)
     }
@@ -94,64 +118,87 @@ export function WelcomeScreen({ onCreateProject, onOpenProject }: WelcomeScreenP
       setError(null)
 
       if (isTauri) {
-        try {
-          // Use Tauri's dialog API to select a file
-          const selected = await window.__TAURI__.dialog.open({
-            multiple: false,
-            filters: [
-              {
-                name: "Quill Projects",
-                extensions: ["quill"],
-              },
-            ],
-          })
+        const selected = await window.__TAURI__.dialog.open({
+          multiple: false,
+          filters: [{ name: "Quill Projects", extensions: ["quill"] }],
+        })
 
-          if (selected) {
-            // Read the file using Tauri's fs API
-            const fileContent = await window.__TAURI__.fs.readBinaryFile(selected as string)
+        if (!selected) return
 
-            // Load the project from the file content
-            const project = await loadProjectZip(fileContent)
-
-            // Find the Scene 1 document ID to select it by default
-            const findSceneId = (nodes: any[]): string | null => {
-              for (const node of nodes) {
-                if (node.label === "Scene 1" && node.type === "document") {
-                  return node.id
-                }
-                if (node.children) {
-                  const id = findSceneId(node.children)
-                  if (id) return id
-                }
-              }
-              return null
-            }
-
-            // Pass the Scene 1 ID to be selected
-            const sceneId = findSceneId(project.treeStructure)
-
-            // Add to recent projects
-            await addRecentProject(project.metadata.name, selected as string)
-
-            // Open the project
-            onOpenProject(project, sceneId)
-          }
-        } catch (error) {
-          console.error("Failed to open project:", error)
-          setError(`Error loading project: ${error instanceof Error ? error.message : "Unknown error"}`)
-        }
-      } else {
-        // Fallback for browser environment - use file input
-        if (fileInputRef.current) {
-          fileInputRef.current.click()
-        }
+        const filePath = selected as string
+        const fileContent = await window.__TAURI__.fs.readBinaryFile(filePath)
+        const project = await loadProjectZip(fileContent, filePath)
+        await addRecentProject(project.metadata.name, filePath)
+        await openProjectFromData(project, filePath)
+        await refreshRecentProjects()
+        return
       }
+
+      fileInputRef.current?.click()
+    } catch (openError) {
+      console.error("Failed to open project:", openError)
+      setError(`Error loading project: ${openError instanceof Error ? openError.message : "Unknown error"}`)
     } finally {
       setIsLoading(false)
     }
   }
 
-  // Handle file selection (for browser fallback)
+  const handleOpenRecent = async (recent: RecentProject) => {
+    try {
+      if (!isTauri || !recent.path || recent.path.startsWith("browser:")) {
+        setError("This recent project entry is not available directly in the desktop app.")
+        return
+      }
+
+      setIsLoading(true)
+      setError(null)
+
+      const exists = await window.__TAURI__.fs.exists(recent.path)
+      if (!exists) {
+        await removeRecentProject(recent.path)
+        await refreshRecentProjects()
+        setError(`Project not found on disk: ${recent.path}`)
+        return
+      }
+
+      const fileContent = await window.__TAURI__.fs.readBinaryFile(recent.path)
+      const project = await loadProjectZip(fileContent, recent.path)
+      await openProjectFromData(project, recent.path)
+    } catch (recentError) {
+      console.error("Failed to open recent project:", recentError)
+      setError(`Failed to open recent project: ${recentError instanceof Error ? recentError.message : "Unknown error"}`)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleRecoverAutosave = async () => {
+    try {
+      setIsLoading(true)
+      setError(null)
+
+      const backup = localStorage.getItem("quill-autosave-project")
+      if (!backup) {
+        setHasAutosaveBackup(false)
+        setBackupTimestamp(null)
+        setError("No autosave backup found.")
+        return
+      }
+
+      const parsed = JSON.parse(backup) as QuillProject
+      if (!isProjectValid(parsed)) {
+        throw new Error("Autosave data is invalid")
+      }
+
+      await openProjectFromData(parsed, null)
+    } catch (recoverError) {
+      console.error("Failed to recover autosave:", recoverError)
+      setError(`Could not recover autosave: ${recoverError instanceof Error ? recoverError.message : "Unknown error"}`)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -160,302 +207,150 @@ export function WelcomeScreen({ onCreateProject, onOpenProject }: WelcomeScreenP
       setIsLoading(true)
       setError(null)
 
-      // Load the project from the file
       const project = await loadProjectZip(file)
-
-      // Find the Scene 1 document ID to select it by default
-      const findSceneId = (nodes: any[]): string | null => {
-        for (const node of nodes) {
-          if (node.label === "Scene 1" && node.type === "document") {
-            return node.id
-          }
-          if (node.children) {
-            const id = findSceneId(node.children)
-            if (id) return id
-          }
-        }
-        return null
-      }
-
-      // Pass the Scene 1 ID to be selected
-      const sceneId = findSceneId(project.treeStructure)
-
-      // Add to recent projects with a browser placeholder path
       await addRecentProject(project.metadata.name, `browser:${file.name}`)
-
-      // Open the project
-      onOpenProject(project, sceneId)
-
-      // Reset the file input
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ""
-      }
-    } catch (error) {
-      console.error("Failed to open project:", error)
-      setError(`Error loading project: ${error instanceof Error ? error.message : "Unknown error"}`)
+      await openProjectFromData(project, null)
+      await refreshRecentProjects()
+    } catch (openError) {
+      console.error("Failed to open selected project file:", openError)
+      setError(`Error loading project: ${openError instanceof Error ? openError.message : "Unknown error"}`)
     } finally {
+      if (fileInputRef.current) fileInputRef.current.value = ""
       setIsLoading(false)
-    }
-  }
-
-  // Handle opening a recent project
-  const handleOpenRecentProject = async (project: RecentProject) => {
-    try {
-      setIsLoading(true)
-      setError(null)
-
-      if (isTauri) {
-        // Check if the file exists
-        const exists = await window.__TAURI__.fs.exists(project.path)
-        if (!exists) {
-          setError(`Project file not found: ${project.path}`)
-          await removeRecentProject(project.path)
-          setRecentProjects((prev) => prev.filter((p) => p.path !== project.path))
-          return
-        }
-
-        // Read the file using Tauri's fs API
-        const fileContent = await window.__TAURI__.fs.readBinaryFile(project.path)
-
-        // Load the project from the file content
-        const loadedProject = await loadProjectZip(fileContent)
-
-        // Find the Scene 1 document ID to select it by default
-        const findSceneId = (nodes: any[]): string | null => {
-          for (const node of nodes) {
-            if (node.label === "Scene 1" && node.type === "document") {
-              return node.id
-            }
-            if (node.children) {
-              const id = findSceneId(node.children)
-              if (id) return id
-            }
-          }
-          return null
-        }
-
-        // Pass the Scene 1 ID to be selected
-        const sceneId = findSceneId(loadedProject.treeStructure)
-
-        // Open the project
-        onOpenProject(loadedProject, sceneId)
-      } else {
-        // In browser environment, we can't directly access the file
-        // So we need to prompt the user to select it
-        setError(
-          "In the desktop app, this would open the project directly. Please use the Open Project button to select the file manually.",
-        )
-        handleOpenProject()
-      }
-    } catch (error) {
-      console.error("Failed to open recent project:", error)
-      setError(`Error loading project: ${error instanceof Error ? error.message : "Unknown error"}`)
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  // Handle removing a recent project
-  const handleRemoveRecentProject = async (path: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-
-    try {
-      // Remove from state
-      const updatedProjects = recentProjects.filter((project) => project.path !== path)
-      setRecentProjects(updatedProjects)
-
-      // Update preferences
-      await removeRecentProject(path)
-    } catch (error) {
-      console.error("Failed to remove recent project:", error)
-      // Don't show error to user, just log it
-    }
-  }
-
-  // Get theme-specific styles
-  const getCardClass = () => {
-    if (theme === "muted-elegance") {
-      return "bg-[#4D4D4D]/90 border-[#666666] hover:bg-[#5A5A5A]/90"
-    } else if (theme === "dark") {
-      return "dark:bg-gray-800/90 dark:border-gray-700 dark:hover:bg-gray-700/90"
-    } else {
-      return "bg-white/90 hover:bg-white/95"
-    }
-  }
-
-  const getBackgroundClass = () => {
-    if (theme === "muted-elegance") {
-      return "bg-[#565656]"
-    } else if (theme === "dark") {
-      return "bg-gray-950"
-    } else {
-      return "bg-gray-50"
     }
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden">
-      {/* Background image */}
-      <div
-        className="absolute inset-0 z-0"
-        style={{
-          backgroundImage: "url('/images/background_for_quill.png')",
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-        }}
-      />
+    <div className="welcome-shell app-workspace relative min-h-screen overflow-hidden px-5 py-6">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -left-28 top-14 h-72 w-72 rounded-full bg-primary/10 blur-3xl" />
+        <div className="absolute right-8 top-8 h-56 w-56 rounded-full bg-primary/10 blur-3xl" />
+      </div>
 
-      {/* Overlay for better text visibility */}
-      <div className="absolute inset-0 bg-black/10 z-10" />
-
-      {/* Content */}
-      <div className="relative z-20 container mx-auto px-4 py-8 max-w-6xl">
-        {/* Header */}
-        <motion.div
-          className="flex items-center justify-center mb-12 pt-8"
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, ease: "easeOut" }}
+      <div className="relative mx-auto flex w-full max-w-[1380px] flex-col gap-6">
+        <motion.header
+          className="glass-toolbar rounded-2xl px-6 py-5"
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: animationReady ? 1 : 0, y: animationReady ? 0 : -10 }}
+          transition={{ duration: 0.3, ease: "easeOut" }}
         >
-          <InkAndQuillLogo className="h-12 w-12 mr-4" />
-          <h1
-            className="text-5xl font-bold text-white drop-shadow-md"
-            style={{ fontFamily: "var(--font-dancing-script)" }}
-          >
-            Ink & Quill
-          </h1>
-        </motion.div>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <InkAndQuillLogo className="h-8 w-8" />
+              <div>
+                <h1 className="text-lg font-semibold tracking-wide">Welcome Back to Ink & Quill</h1>
+                <p className="text-sm text-muted-foreground">Open a manuscript, recover your last session, or start something new.</p>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground italic">“Every draft begins with one brave sentence.”</p>
+          </div>
+        </motion.header>
 
-        {/* Error message */}
         {error && (
-          <div className="mb-6 p-4 bg-red-500/80 text-white rounded-md shadow-md">
-            <p>{error}</p>
+          <div className="glass-panel flex items-start gap-2 rounded-xl px-4 py-3 text-sm">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <span>{error}</span>
           </div>
         )}
 
-        {/* Main content */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Left column - Create New */}
+        <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
           <motion.div
-            className="flex flex-col"
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: animationComplete ? 1 : 0, x: animationComplete ? 0 : -20 }}
-            transition={{ duration: 0.5, delay: 0.3 }}
+            initial={{ opacity: 0, x: -12 }}
+            animate={{ opacity: animationReady ? 1 : 0, x: animationReady ? 0 : -12 }}
+            transition={{ duration: 0.3, delay: 0.05 }}
           >
-            <div className="mb-4 flex items-center">
-              <FileText className="mr-2 h-5 w-5 text-white" />
-              <h2 className="text-xl font-semibold text-white drop-shadow-sm">Create New</h2>
-            </div>
-            <Card className={`${getCardClass()} transition-colors duration-200`}>
-              <CardContent className="p-6">
-                <p className="mb-6 text-sm">
-                  Start a fresh writing project with our default structure or customize it to your needs.
-                </p>
-                <Button className="w-full" onClick={handleNewProject} disabled={isLoading}>
-                  {isLoading ? "Creating..." : "New Project"}
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </CardContent>
-            </Card>
-          </motion.div>
+            <GlassPanel className="h-full rounded-2xl p-6">
+              <div className="mb-6">
+                <h2 className="text-xl font-semibold">Start Writing</h2>
+                <p className="mt-1 text-sm text-muted-foreground">Choose how you want to jump in today.</p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  className="rounded-xl border border-white/10 bg-white/5 p-4 text-left transition-colors hover:bg-white/10"
+                  onClick={handleNewProject}
+                  disabled={isLoading}
+                >
+                  <div className="mb-2 flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-primary" />
+                    <span className="text-sm font-semibold">New Project</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Create a fresh project with a starter manuscript layout.</p>
+                </button>
 
-          {/* Middle column - Open Existing */}
-          <motion.div
-            className="flex flex-col"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: animationComplete ? 1 : 0, y: animationComplete ? 0 : 20 }}
-            transition={{ duration: 0.5, delay: 0.5 }}
-          >
-            <div className="mb-4 flex items-center">
-              <FolderOpen className="mr-2 h-5 w-5 text-white" />
-              <h2 className="text-xl font-semibold text-white drop-shadow-sm">Open Existing</h2>
-            </div>
-            <Card className={`${getCardClass()} transition-colors duration-200`}>
-              <CardContent className="p-6">
-                <p className="mb-6 text-sm">
-                  Continue working on an existing Quill project by opening a .quill file from your computer.
-                </p>
-                <Button variant="outline" className="w-full" onClick={handleOpenProject} disabled={isLoading}>
+                <button
+                  type="button"
+                  className="rounded-xl border border-white/10 bg-white/5 p-4 text-left transition-colors hover:bg-white/10"
+                  onClick={handleOpenProject}
+                  disabled={isLoading}
+                >
+                  <div className="mb-2 flex items-center gap-2">
+                    <FolderOpen className="h-4 w-4 text-primary" />
+                    <span className="text-sm font-semibold">Open Project</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Load an existing `.quill` file from your device.</p>
+                </button>
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button onClick={handleNewProject} disabled={isLoading}>
+                  {isLoading ? "Creating..." : "Create Project"}
+                </Button>
+                <Button variant="outline" onClick={handleOpenProject} disabled={isLoading}>
                   {isLoading ? "Opening..." : "Open Project"}
-                  <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
-              </CardContent>
-            </Card>
+                {hasAutosaveBackup && (
+                  <Button variant="secondary" onClick={handleRecoverAutosave} disabled={isLoading}>
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                    Recover Autosave
+                  </Button>
+                )}
+              </div>
+              {backupTimestamp && (
+                <p className="mt-3 text-xs text-muted-foreground">Last autosave: {new Date(backupTimestamp).toLocaleString()}</p>
+              )}
+            </GlassPanel>
           </motion.div>
 
-          {/* Right column - Recent Projects */}
           <motion.div
-            className="flex flex-col"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: animationComplete ? 1 : 0, x: animationComplete ? 0 : 20 }}
-            transition={{ duration: 0.5, delay: 0.7 }}
+            initial={{ opacity: 0, x: 12 }}
+            animate={{ opacity: animationReady ? 1 : 0, x: animationReady ? 0 : 12 }}
+            transition={{ duration: 0.3, delay: 0.1 }}
           >
-            <div className="mb-4 flex items-center">
-              <Clock className="mr-2 h-5 w-5 text-white" />
-              <h2 className="text-xl font-semibold text-white drop-shadow-sm">Recent Projects</h2>
-            </div>
-            <Card className={`${getCardClass()} transition-colors duration-200`}>
-              <CardContent className="p-6">
-                {recentProjects.length > 0 ? (
-                  <div className="space-y-3">
-                    {recentProjects.map((project, index) => (
-                      <div key={`${project.path}-${index}`}>
-                        <div
-                          className="flex items-center justify-between p-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer group"
-                          onClick={() => !isLoading && handleOpenRecentProject(project)}
-                        >
-                          <div className="flex items-center">
-                            <FileText className="h-4 w-4 mr-2 text-gray-500" />
-                            <div>
-                              <p className="font-medium text-sm">{project.name}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {new Date(project.lastModified).toLocaleDateString()}
-                              </p>
-                            </div>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={(e) => handleRemoveRecentProject(project.path, e)}
-                            disabled={isLoading}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                        {index < recentProjects.length - 1 && <Separator className="my-1" />}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-4">
-                    <p className="text-sm text-muted-foreground">No recent projects</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            <GlassPanel className="h-full rounded-2xl p-6">
+              <div className="mb-4 flex items-center gap-2">
+                <Clock className="h-4 w-4 text-primary" />
+                <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted-foreground">Recent Projects</h2>
+              </div>
+              {recentProjects.length > 0 ? (
+                <div className="space-y-2">
+                  {recentProjects.slice(0, 10).map((project) => (
+                    <button
+                      key={typeof project.path === "string" ? project.path : String(project.path)}
+                      type="button"
+                      onClick={() => handleOpenRecent(project)}
+                      className="flex w-full flex-col rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-left transition-colors hover:bg-white/10"
+                      disabled={isLoading}
+                    >
+                      <span className="truncate text-sm font-medium">
+                        {typeof project.name === "string" ? project.name : "Untitled Project"}
+                      </span>
+                      <span className="truncate text-xs text-muted-foreground">
+                        {new Date(
+                          typeof project.lastModified === "string" ? project.lastModified : Date.now(),
+                        ).toLocaleString()}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No recent projects yet. Your latest projects will show up here.</p>
+              )}
+            </GlassPanel>
           </motion.div>
         </div>
-
-        {/* Replace the footer with "Welcome Home" in cursive */}
-        <motion.div
-          className="mt-24 text-center"
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: animationComplete ? 1 : 0, scale: animationComplete ? 1 : 0.9 }}
-          transition={{ duration: 0.8, delay: 1.2 }}
-        >
-          <h2
-            className="text-6xl text-white drop-shadow-lg"
-            style={{
-              fontFamily: "var(--font-dancing-script)",
-              textShadow: "0 4px 6px rgba(0, 0, 0, 0.2)",
-            }}
-          >
-            Welcome to your home for creative writing
-          </h2>
-        </motion.div>
       </div>
-      {/* Hidden file input for opening projects (browser fallback) */}
+
       <input type="file" ref={fileInputRef} className="hidden" accept=".quill" onChange={handleFileChange} />
     </div>
   )

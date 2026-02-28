@@ -12,7 +12,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useTheme } from "next-themes"
 import type { DocumentData } from "@/lib/project-types"
 
 interface InspectorProps {
@@ -27,8 +26,6 @@ export function Inspector({ selectedNode, documents, onDocumentUpdate }: Inspect
   const [status, setStatus] = useState("to-do")
   const [label, setLabel] = useState("none")
   const [keywords, setKeywords] = useState("")
-
-  const { theme } = useTheme()
 
   // Load data based on selected node
   useEffect(() => {
@@ -62,32 +59,23 @@ export function Inspector({ selectedNode, documents, onDocumentUpdate }: Inspect
     }
   }
 
-  const getPanelClass = () => {
-    if (theme === "muted-elegance") {
-      return "bg-[#565656] text-[#F0F0F0] border-[#666666]"
-    }
-    return ""
-  }
+  const panelClass =
+    "rounded-xl border border-white/10 bg-white/10 text-foreground shadow-none transition-all focus-visible:ring-1 focus-visible:ring-primary/35"
 
   return (
-    <div className="h-full flex flex-col dark:bg-gray-950">
-      <div className={`p-2 border-b ${theme === "muted-elegance" ? "border-[#666666]" : "dark:border-gray-800"}`}>
-        <h2 className="text-lg font-medium dark:text-white">Inspector</h2>
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Inspector</h2>
       </div>
-      <ScrollArea className="flex-1 p-4">
-        <div className="space-y-6">
+      <ScrollArea className="flex-1 min-h-0 px-4 pb-4">
+        <div className="space-y-6 pt-4">
           <div className="space-y-2">
             <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Synopsis</Label>
             <Textarea
               placeholder="Brief summary of this document..."
-              className={`min-h-[100px] resize-none ${getPanelClass()}`}
+              className={`min-h-[100px] resize-none ${panelClass}`}
               value={synopsis}
               onChange={(e) => handleUpdate("synopsis", e.target.value)}
-              style={{
-                backgroundColor: theme === "muted-elegance" ? "#565656" : "",
-                color: theme === "muted-elegance" ? "#F0F0F0" : "",
-                borderColor: theme === "muted-elegance" ? "#666666" : "",
-              }}
               disabled={!selectedNode}
             />
           </div>
@@ -100,10 +88,7 @@ export function Inspector({ selectedNode, documents, onDocumentUpdate }: Inspect
                 value={status}
                 onValueChange={(val) => handleUpdate("status", val)}
               >
-                <SelectTrigger className={getPanelClass()} style={{
-                  backgroundColor: theme === "muted-elegance" ? "#565656" : "",
-                  borderColor: theme === "muted-elegance" ? "#666666" : "",
-                }}>
+                <SelectTrigger className={panelClass}>
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
@@ -121,13 +106,8 @@ export function Inspector({ selectedNode, documents, onDocumentUpdate }: Inspect
                 disabled={!selectedNode}
                 value={label}
                 onChange={(e) => handleUpdate("label", e.target.value)}
-                className={getPanelClass()}
+                className={panelClass}
                 placeholder="e.g. Concept, Note..."
-                style={{
-                  backgroundColor: theme === "muted-elegance" ? "#565656" : "",
-                  color: theme === "muted-elegance" ? "#F0F0F0" : "",
-                  borderColor: theme === "muted-elegance" ? "#666666" : "",
-                }}
               />
             </div>
           </div>
@@ -139,12 +119,7 @@ export function Inspector({ selectedNode, documents, onDocumentUpdate }: Inspect
               value={keywords}
               onChange={(e) => handleUpdate("keywords", e.target.value)}
               placeholder="Comma-separated tags"
-              className={getPanelClass()}
-              style={{
-                backgroundColor: theme === "muted-elegance" ? "#565656" : "",
-                color: theme === "muted-elegance" ? "#F0F0F0" : "",
-                borderColor: theme === "muted-elegance" ? "#666666" : "",
-              }}
+              className={panelClass}
             />
           </div>
 
@@ -152,14 +127,9 @@ export function Inspector({ selectedNode, documents, onDocumentUpdate }: Inspect
             <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Notes</Label>
             <Textarea
               placeholder="Enter notes..."
-              className={`min-h-[200px] ${getPanelClass()}`}
+              className={`min-h-[200px] ${panelClass}`}
               value={notes}
               onChange={(e) => handleUpdate("notes", e.target.value)}
-              style={{
-                backgroundColor: theme === "muted-elegance" ? "#565656" : "",
-                color: theme === "muted-elegance" ? "#F0F0F0" : "",
-                borderColor: theme === "muted-elegance" ? "#666666" : "",
-              }}
               disabled={!selectedNode}
             />
           </div>

@@ -6,11 +6,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Sun, Moon, Palette, InfoIcon } from "lucide-react"
+import { Sun, Moon, Monitor, InfoIcon } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { selectDirectory } from "@/lib/project-io"
-import { loadPreferences, updatePreference } from "@/lib/user-preferences"
+import { loadPreferences, normalizeTheme, type AppTheme, updatePreference } from "@/lib/user-preferences"
 import { isTauri } from "@/lib/environment"
 
 interface SettingsDialogProps {
@@ -67,10 +67,12 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   }
 
   // Update theme handler to save to preferences
-  const handleThemeChange = async (newTheme: string) => {
+  const handleThemeChange = async (newTheme: AppTheme) => {
     setTheme(newTheme)
     await updatePreference("theme", newTheme)
   }
+
+  const selectedTheme = normalizeTheme(theme)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -87,12 +89,27 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           <TabsContent value="personalization" className="mt-6 space-y-6 tab-content transition-all duration-300">
             <div className="space-y-4">
               <h3 className="text-lg font-medium">Theme</h3>
-              <RadioGroup value={theme} onValueChange={handleThemeChange} className="grid grid-cols-2 gap-4">
+              <RadioGroup
+                value={selectedTheme}
+                onValueChange={(value) => handleThemeChange(normalizeTheme(value))}
+                className="grid grid-cols-1 gap-4 sm:grid-cols-3"
+              >
+                <div>
+                  <RadioGroupItem value="system" id="theme-system" className="peer sr-only" />
+                  <Label
+                    htmlFor="theme-system"
+                    className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-card p-4 hover:bg-muted/60 hover:text-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary"
+                  >
+                    <Monitor className="mb-3 h-6 w-6" />
+                    System
+                  </Label>
+                </div>
+
                 <div>
                   <RadioGroupItem value="light" id="theme-light" className="peer sr-only" />
                   <Label
                     htmlFor="theme-light"
-                    className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-white p-4 hover:bg-gray-100 hover:text-gray-900 peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary"
+                    className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-white p-4 text-slate-900 hover:bg-slate-100 hover:text-slate-950 peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary"
                   >
                     <Sun className="mb-3 h-6 w-6" />
                     Light
@@ -107,17 +124,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   >
                     <Moon className="mb-3 h-6 w-6" />
                     Dark
-                  </Label>
-                </div>
-
-                <div>
-                  <RadioGroupItem value="muted-elegance" id="theme-muted-elegance" className="peer sr-only" />
-                  <Label
-                    htmlFor="theme-muted-elegance"
-                    className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-[#565656] text-[#F0F0F0] p-4 hover:bg-[#666666] hover:text-[#F0F0F0] peer-data-[state=checked]:border-[#E3B5A4] [&:has([data-state=checked])]:border-[#E3B5A4]"
-                  >
-                    <Palette className="mb-3 h-6 w-6" />
-                    Muted Elegance
                   </Label>
                 </div>
               </RadioGroup>

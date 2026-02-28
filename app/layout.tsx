@@ -1,20 +1,12 @@
 import type React from "react"
 import type { Metadata } from "next"
-import { Inter, Dancing_Script } from "next/font/google"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
-
-const inter = Inter({ subsets: ["latin"] })
-const dancingScript = Dancing_Script({
-  subsets: ["latin"],
-  variable: "--font-dancing-script",
-  display: "swap",
-})
 
 export const metadata: Metadata = {
   title: "Ink & Quill - Writing Project Management",
   description: "Organize your writing projects from start to finish",
-    generator: 'v0.app'
+  generator: "v0.app",
 }
 
 export default function RootLayout({
@@ -23,13 +15,14 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${dancingScript.variable}`}>
-      <body className={inter.className}>
+    <html lang="en" suppressHydrationWarning>
+      <body className="font-sans antialiased">
         <ThemeProvider
           attribute="class"
-          defaultTheme="muted-elegance"
+          defaultTheme="system"
+          enableSystem
           disableTransitionOnChange
-          themes={["light", "dark", "muted-elegance"]}
+          themes={["light", "dark"]}
         >
           {children}
         </ThemeProvider>

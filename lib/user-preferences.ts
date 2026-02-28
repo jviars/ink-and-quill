@@ -2,9 +2,22 @@
 
 import { isTauri } from "./environment"
 
+export type AppTheme = "light" | "dark" | "system"
+
+export function normalizeTheme(value: unknown): AppTheme {
+  if (value === "light" || value === "dark" || value === "system") {
+    return value
+  }
+  // Legacy theme migration
+  if (value === "muted-elegance") {
+    return "system"
+  }
+  return "system"
+}
+
 // Define the user preferences interface
 export interface UserPreferences {
-  theme: string
+  theme: AppTheme
   fontSize: string
   projectDirectory: string
   recentProjects: RecentProject[]
@@ -19,7 +32,7 @@ export interface RecentProject {
 
 // Default preferences
 const defaultPreferences: UserPreferences = {
-  theme: "light",
+  theme: "system",
   fontSize: "16",
   projectDirectory: "",
   recentProjects: [],
@@ -27,6 +40,61 @@ const defaultPreferences: UserPreferences = {
 
 // Maximum number of recent projects to store
 const MAX_RECENT_PROJECTS = 10
+
+function normalizeRecentProject(entry: unknown): RecentProject | null {
+  if (!entry || typeof entry !== "object") return null
+
+  const value = entry as Record<string, unknown>
+
+  let name = value.name
+  if (typeof name !== "string" && name && typeof name === "object") {
+    const nested = name as Record<string, unknown>
+    const nestedMetadata = nested.metadata as Record<string, unknown> | undefined
+    if (typeof nestedMetadata?.name === "string") {
+      name = nestedMetadata.name
+    } else if (typeof nested.name === "string") {
+      name = nested.name
+    }
+  }
+  if (typeof name !== "string" || !name.trim()) {
+    const metadata = value.metadata as Record<string, unknown> | undefined
+    name = typeof metadata?.name === "string" ? metadata.name : "Untitled Project"
+  }
+
+  const path = typeof value.path === "string" ? value.path : ""
+  if (!path.trim()) return null
+
+  const lastModified = typeof value.lastModified === "string" ? value.lastModified : new Date().toISOString()
+
+  return {
+    name: name.trim(),
+    path,
+    lastModified,
+  }
+}
+
+function normalizePreferences(raw: unknown): UserPreferences {
+  const value = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {}
+  const rawRecent = Array.isArray(value.recentProjects) ? value.recentProjects : []
+  const normalizedRecent = rawRecent.map(normalizeRecentProject).filter((entry): entry is RecentProject => Boolean(entry))
+
+  const seenPaths = new Set<string>()
+  const dedupedRecent: RecentProject[] = []
+  for (const project of normalizedRecent) {
+    if (seenPaths.has(project.path)) continue
+    seenPaths.add(project.path)
+    dedupedRecent.push(project)
+    if (dedupedRecent.length >= MAX_RECENT_PROJECTS) break
+  }
+
+  return {
+    theme: normalizeTheme(value.theme),
+    fontSize: typeof value.fontSize === "string" && value.fontSize ? value.fontSize : defaultPreferences.fontSize,
+    projectDirectory:
+      typeof value.projectDirectory === "string" ? value.projectDirectory : defaultPreferences.projectDirectory,
+    recentProjects: dedupedRecent,
+  }
+}
 
 // Get the app config directory for Tauri
 async function getAppConfigDir(): Promise<string> {
@@ -77,12 +145,13 @@ export async function loadPreferences(): Promise<UserPreferences> {
 
       // Parse the JSON
       try {
-        const preferences = JSON.parse(preferencesContent) as UserPreferences
+        const parsed = JSON.parse(preferencesContent)
+        const preferences = normalizePreferences(parsed)
         return preferences
       } catch (error) {
         console.error("Failed to parse preferences:", error)
         // If parsing fails, return default preferences
-        return defaultPreferences
+        return { ...defaultPreferences }
       }
     } else {
       // Use localStorage in browser environment
@@ -95,12 +164,13 @@ export async function loadPreferences(): Promise<UserPreferences> {
 
       // Parse the JSON
       try {
-        const preferences = JSON.parse(preferencesString) as UserPreferences
+        const parsed = JSON.parse(preferencesString)
+        const preferences = normalizePreferences(parsed)
         return preferences
       } catch (error) {
         console.error("Failed to parse preferences:", error)
         // If parsing fails, return default preferences
-        return defaultPreferences
+        return { ...defaultPreferences }
       }
     }
   } catch (error) {
@@ -142,7 +212,11 @@ export async function updatePreference<K extends keyof UserPreferences>(
     const preferences = await loadPreferences()
 
     // Update the preference
-    preferences[key] = value
+    if (key === "theme") {
+      preferences.theme = normalizeTheme(value)
+    } else {
+      preferences[key] = value
+    }
 
     // Save the updated preferences
     await savePreferences(preferences)

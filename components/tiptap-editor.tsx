@@ -19,11 +19,9 @@ import {
   Save,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTheme } from "next-themes"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import Head from "next/head"
 
 // Tiptap imports
 import { useEditor, EditorContent } from "@tiptap/react"
@@ -48,7 +46,6 @@ interface TiptapEditorProps {
 }
 
 // US Letter paper dimensions (in pixels at 96 DPI)
-const PAPER_WIDTH = 816 // 8.5 inches * 96 DPI
 const PAPER_HEIGHT = 1056 // 11 inches * 96 DPI
 const PAPER_MARGIN = 72 // 0.75 inches * 96 DPI
 
@@ -57,11 +54,10 @@ const DEFAULT_FONT_SIZE = "16"
 
 export function TiptapEditor({ selectedNode, initialContent, onContentChange }: TiptapEditorProps) {
   const [mounted, setMounted] = useState(false)
-  const { theme } = useTheme()
+  const { resolvedTheme } = useTheme()
+  const isDark = resolvedTheme === "dark"
   const [papers, setPapers] = useState<number[]>([0]) // Start with one paper
-  const [contentHeight, setContentHeight] = useState(0)
   const [fontSize, setFontSize] = useState<string>(DEFAULT_FONT_SIZE)
-  const editorContainerRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<HTMLDivElement>(null)
   const [showSaveNotification, setShowSaveNotification] = useState(false)
 
@@ -105,7 +101,6 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
       // Notify parent component of content change
       if (onContentChange && selectedNode) {
         const content = editor.getHTML()
-        console.log(`Saving content for document: ${selectedNode}`)
         onContentChange(content)
       }
     },
@@ -122,7 +117,6 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
     if (!editorRef.current || !editor) return
 
     const contentHeight = editorRef.current.scrollHeight
-    setContentHeight(contentHeight)
 
     // Calculate how many pages we need
     const contentAreaHeight = PAPER_HEIGHT - PAPER_MARGIN * 2 // Account for top and bottom margins
@@ -139,8 +133,6 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
 
     // When selectedNode changes or initialContent changes
     if (initialContent) {
-      console.log(`Loading content for document: ${selectedNode}`)
-
       // Only set content if it's different from current content
       const currentContent = editor.getHTML()
 
@@ -149,8 +141,6 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
       const normalizedInitialContent = initialContent.replace(/\s+/g, " ").trim()
 
       if (normalizedCurrentContent !== normalizedInitialContent) {
-        console.log("Content differs, updating editor")
-
         // Use setTimeout to avoid React update cycles
         setTimeout(() => {
           editor.commands.setContent(initialContent)
@@ -168,11 +158,10 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
       }
     } else {
       // If no content is provided, set empty content to show placeholder
-      console.log("No content provided, setting empty content to show placeholder")
       editor.commands.setContent("")
 
-      // Apply default font size to empty content
-      editor.chain().focus().setFontSize(DEFAULT_FONT_SIZE).run()
+        // Apply default font size to empty content
+        ; (editor.chain().focus() as any).setFontSize(DEFAULT_FONT_SIZE).run()
     }
   }, [selectedNode, initialContent, editor])
 
@@ -251,49 +240,43 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
   }
 
   const getEditorBackgroundClass = () => {
-    if (theme === "muted-elegance") {
-      return "bg-[#5D5D5D]" // Slightly darker than the UI background
-    } else if (theme === "dark") {
-      return "bg-gray-900" // Dark background for dark theme
+    if (isDark) {
+      return "bg-slate-950/35"
     } else {
-      return "bg-gray-100" // Light gray for light theme
+      return "bg-slate-100/30"
     }
   }
 
   const getToolbarButtonClass = () => {
-    if (theme === "muted-elegance") {
-      return "text-[#F0F0F0] hover:bg-[#666666]"
+    if (isDark) {
+      return "text-slate-100 hover:bg-white/10"
     }
     return ""
   }
 
-  // Updated to provide theme-specific paper and text colors
+  // Updated to provide theme-specific paper, text colors, and floating aesthetics
   const getPaperStyle = () => {
-    if (theme === "muted-elegance") {
+    if (isDark) {
       return {
-        backgroundColor: "#E8DCC9", // Darker parchment-like color
-        color: "#2D2A24", // Slightly darker text for better contrast on parchment
-        boxShadow: "0 2px 8px rgba(0, 0, 0, 0.15)",
-      }
-    } else if (theme === "dark") {
-      return {
-        backgroundColor: "#2A2A2A", // Dark gray paper that's not too harsh
-        color: "#E0E0E0", // Light gray text for good contrast
-        boxShadow: "0 2px 8px rgba(0, 0, 0, 0.3)",
+        // Keep manuscript paper light in dark mode for readability (Scrivener-like).
+        backgroundColor: "#F8F7F4",
+        color: "#1F2124",
+        boxShadow: "0 16px 40px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.2)",
+        borderRadius: "16px",
       }
     } else {
-      // Light theme - keep white paper
       return {
         backgroundColor: "#FFFFFF",
-        color: "#000000",
-        boxShadow: "0 2px 8px rgba(0, 0, 0, 0.1)",
+        color: "#333333",
+        boxShadow: "0 12px 32px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.03)",
+        borderRadius: "16px",
       }
     }
   }
 
   const handleFontSizeChange = (size: string) => {
     setFontSize(size)
-    editor?.chain().focus().setFontSize(size).run()
+      ; (editor?.chain().focus() as any).setFontSize(size).run()
   }
 
   const handleSave = () => {
@@ -304,16 +287,10 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
 
   return (
     <>
-      <Head>
-        <link
-          href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;700&display=swap"
-          rel="stylesheet"
-        />
-      </Head>
-      <div className="flex flex-col h-full dark:bg-gray-950">
-        <div className="border-b p-2 flex items-center dark:border-gray-800">
+      <div className="flex h-full min-h-0 flex-col pane-surface">
+        <div className="flex flex-wrap items-center gap-2 border-b border-white/10 bg-transparent p-2">
           <TooltipProvider>
-            <div className="flex items-center space-x-1">
+            <div className="flex items-center space-x-1 glass-toolbar-group">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -344,9 +321,8 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
               </Tooltip>
             </div>
           </TooltipProvider>
-          <Separator orientation="vertical" className="mx-2 h-6" />
           <TooltipProvider>
-            <div className="flex items-center space-x-1">
+            <div className="flex items-center space-x-1 glass-toolbar-group">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -388,9 +364,8 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
               </Tooltip>
             </div>
           </TooltipProvider>
-          <Separator orientation="vertical" className="mx-2 h-6" />
           <TooltipProvider>
-            <div className="flex items-center space-x-1">
+            <div className="flex items-center space-x-1 glass-toolbar-group">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -432,9 +407,8 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
               </Tooltip>
             </div>
           </TooltipProvider>
-          <Separator orientation="vertical" className="mx-2 h-6" />
           <TooltipProvider>
-            <div className="flex items-center space-x-1">
+            <div className="flex items-center space-x-1 glass-toolbar-group">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -463,9 +437,8 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
               </Tooltip>
             </div>
           </TooltipProvider>
-          <Separator orientation="vertical" className="mx-2 h-6" />
           <TooltipProvider>
-            <div className="flex items-center space-x-1">
+            <div className="flex items-center space-x-1 glass-toolbar-group">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -494,16 +467,15 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
               </Tooltip>
             </div>
           </TooltipProvider>
-          <Separator orientation="vertical" className="mx-2 h-6" />
           <TooltipProvider>
-            <div className="flex items-center space-x-1">
+            <div className="flex items-center space-x-1 glass-toolbar-group">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon"
                     className={`${getToolbarButtonClass()} h-8 w-8`}
-                    onClick={() => editor?.chain().focus().setPageBreak().run()}
+                    onClick={() => (editor?.chain().focus() as any).setPageBreak().run()}
                   >
                     <FileBreak className="h-4 w-4" />
                   </Button>
@@ -512,9 +484,8 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
               </Tooltip>
             </div>
           </TooltipProvider>
-          <Separator orientation="vertical" className="mx-2 h-6" />
           <TooltipProvider>
-            <div className="flex items-center space-x-1">
+            <div className="flex items-center space-x-1 glass-toolbar-group">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -555,7 +526,7 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
             </div>
           </TooltipProvider>
         </div>
-        <div className={`flex-1 overflow-auto overflow-x-hidden editor-scroll-container ${getEditorBackgroundClass()}`}>
+        <div className={`editor-scroll-container flex-1 min-h-0 overflow-auto overflow-x-hidden ${getEditorBackgroundClass()}`}>
           <div
             className="editor-wrapper mx-auto my-4 paper-animation"
             style={{
@@ -567,7 +538,7 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
             <EditorContent editor={editor} className="editor" />
           </div>
         </div>
-        <div className="border-t p-2 flex justify-between items-center text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400">
+        <div className="flex items-center justify-between border-t border-white/10 p-2 text-sm text-muted-foreground">
           <div className="flex items-center space-x-3">
             <span>{editor?.storage.wordCount.wordCount || 0} words</span>
             <span className="text-muted-foreground">•</span>

@@ -3,9 +3,7 @@
 import type React from "react"
 
 import { useState, useEffect, startTransition, useRef } from "react"
-import { Book, List, Settings, FileText, Save, FolderOpen, Pencil, Check, X, LogOut, Printer } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
+import { List, Settings, FileText, Save, FolderOpen, Pencil, Check, X, LogOut, Printer, Maximize, Minimize } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { TiptapEditor } from "@/components/tiptap-editor"
 import { Outliner } from "@/components/outliner"
@@ -29,20 +27,20 @@ import {
 // Import the new project-io functions
 import { saveProjectZip, loadProjectZip } from "@/lib/project-io"
 import { saveAs } from "file-saver"
-import { extractCurrentProject } from "@/lib/project-types"
-import { createEmptyProject } from "@/lib/project-manager"
-
-// Import user preferences
-import { loadPreferences, updatePreference } from "@/lib/user-preferences"
-import type { UserPreferences } from "@/lib/user-preferences"
+import { extractCurrentProject, createEmptyProject } from "@/lib/project-types"
+import { loadPreferences, normalizeTheme, updatePreference } from "@/lib/user-preferences"
+import HTMLToDOCX from "html-to-docx"
+import JSZip from "jszip"
+import { cn } from "@/lib/utils"
+import { GlassIconButton, GlassPanel, GlassSegmented, GlassToolbarGroup } from "@/components/glass-ui"
 
 // Import environment check
 import { isTauri } from "@/lib/environment"
 
 // Change the viewMode type to remove "corkboard"
 export default function Dashboard() {
-  const [preferences, setPreferences] = useState<UserPreferences | null>(null)
   const [viewMode, setViewMode] = useState<"document" | "outliner">("document")
+  const [focusMode, setFocusMode] = useState(false)
   const [selectedNode, setSelectedNode] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
   const { theme, setTheme } = useTheme()
@@ -50,6 +48,7 @@ export default function Dashboard() {
   const [showSaveNotification, setShowSaveNotification] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [currentProject, setCurrentProject] = useState<QuillProject | null>(null)
+  const [projectFilePath, setProjectFilePath] = useState<string | null>(null)
   const [documents, setDocuments] = useState<Record<string, DocumentData>>({})
   const [treeData, setTreeData] = useState<TreeNode[]>([])
   const [projectName, setProjectName] = useState("Untitled Project")
@@ -58,16 +57,19 @@ export default function Dashboard() {
   const [editedProjectName, setEditedProjectName] = useState(projectName)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const clearAutosaveBackup = () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("quill-autosave-project")
+    }
+  }
 
   // Add this useEffect to load preferences
   useEffect(() => {
     loadPreferences()
       .then((prefs) => {
-        setPreferences(prefs)
-
         // Apply preferences
         if (prefs.theme) {
-          setTheme(prefs.theme)
+          setTheme(normalizeTheme(prefs.theme))
         }
         if (prefs.fontSize) {
           setFontSize(prefs.fontSize)
@@ -85,7 +87,7 @@ export default function Dashboard() {
         {
           id: "root",
           label: "My Project",
-          type: "folder",
+          type: "folder" as const,
           children: [],
         },
       ]
@@ -119,6 +121,8 @@ export default function Dashboard() {
     setTreeData(newProject.treeStructure)
     setDocuments(newProject.documents)
     setSelectedNode(sceneId)
+    setProjectFilePath(null)
+    clearAutosaveBackup()
 
     // Show success notification
     setShowSaveNotification(true)
@@ -171,12 +175,15 @@ export default function Dashboard() {
           setTreeData(project.treeStructure)
           setDocuments(project.documents || {})
           setSelectedNode(sceneId)
+          setProjectFilePath(selected as string)
+          clearAutosaveBackup()
 
           // Apply project settings
           if (project.settings.theme) {
-            setTheme(project.settings.theme)
+            const normalizedTheme = normalizeTheme(project.settings.theme)
+            setTheme(normalizedTheme)
             // Update theme preference
-            await updatePreference("theme", project.settings.theme)
+            await updatePreference("theme", normalizedTheme)
           }
           if (project.settings.fontSize) {
             setFontSize(project.settings.fontSize)
@@ -233,10 +240,13 @@ export default function Dashboard() {
       setTreeData(project.treeStructure)
       setDocuments(project.documents || {})
       setSelectedNode(sceneId)
+      // Browsers don't support retaining path references, we rely on indexedDB or manual download
+      setProjectFilePath(null)
+      clearAutosaveBackup()
 
       // Apply project settings
       if (project.settings.theme) {
-        setTheme(project.settings.theme)
+        setTheme(normalizeTheme(project.settings.theme))
       }
       if (project.settings.fontSize) {
         setFontSize(project.settings.fontSize)
@@ -263,11 +273,23 @@ export default function Dashboard() {
     setMounted(true)
   }, [])
 
+  // Setup auto-save effect
+  useEffect(() => {
+    // We only want to auto-save if we have a project loaded
+    if (!currentProject || !mounted) return
+
+    // Create a timeout to debounce saves
+    const timer = setTimeout(() => {
+      handleSaveProject(true) // Pass true to indicate it's an auto-save (silent)
+    }, 3000)
+
+    return () => clearTimeout(timer)
+  }, [treeData, documents, theme, fontSize, projectName])
+
   // Initialize documents only once on mount
   useEffect(() => {
     // Only initialize if documents is empty and we haven't already initialized
     if (Object.keys(documents).length === 0 && !currentProject) {
-      console.log("Initializing empty documents object")
       setDocuments({})
     }
   }, []) // Empty dependency array ensures this only runs once on mount
@@ -304,36 +326,18 @@ export default function Dashboard() {
     checkProjectDirectory()
   }, [])
 
-  const getHeaderClass = () => {
-    if (theme === "muted-elegance") {
-      return "bg-[#565656] border-[#666666]"
-    } else if (theme === "dark") {
-      return "dark:bg-gray-950 dark:border-gray-800"
-    } else {
-      return "bg-white"
-    }
-  }
-
-  const getSidebarClass = () => {
-    if (theme === "muted-elegance") {
-      return "bg-[#4D4D4D]"
-    } else if (theme === "dark") {
-      return "dark:bg-gray-900"
-    } else {
-      return "bg-gray-50"
-    }
-  }
-
   // Update the handleCreateProject function to accept and use the selectedNodeId parameter
-  const handleCreateProject = (project: QuillProject, selectedNodeId?: string | null) => {
+  const handleCreateProject = (project: QuillProject, selectedNodeId?: string | null, filePath: string | null = null) => {
     setCurrentProject(project)
     setProjectName(project.metadata.name)
     setTreeData(project.treeStructure)
     setDocuments(project.documents)
+    setProjectFilePath(filePath)
+    clearAutosaveBackup()
 
     // Apply project settings
     if (project.settings.theme) {
-      setTheme(project.settings.theme)
+      setTheme(normalizeTheme(project.settings.theme))
     }
     if (project.settings.fontSize) {
       setFontSize(project.settings.fontSize)
@@ -351,11 +355,7 @@ export default function Dashboard() {
   }
 
   // Update the handleOpenProject function to properly handle recent projects
-  const handleOpenProject = (project: QuillProject, selectedNodeId?: string | null) => {
-    // Log the project data for debugging
-    console.log("Opening project:", project)
-    console.log("Tree structure before setting state:", project.treeStructure)
-
+  const handleOpenProject = (project: QuillProject, selectedNodeId?: string | null, filePath: string | null = null) => {
     // Make sure we have a valid tree structure
     if (!project.treeStructure || !Array.isArray(project.treeStructure) || project.treeStructure.length === 0) {
       console.error("Invalid tree structure in project:", project)
@@ -366,20 +366,21 @@ export default function Dashboard() {
     startTransition(() => {
       // Set the current project first
       setCurrentProject(project)
+      setProjectFilePath(filePath)
+      clearAutosaveBackup()
 
       // Set project name
       setProjectName(project.metadata.name)
 
       // Set the tree data - this is critical for the sidebar
       setTreeData(project.treeStructure)
-      console.log("Tree data set to:", project.treeStructure)
 
       // Set documents
       setDocuments(project.documents || {})
 
       // Apply project settings
       if (project.settings.theme) {
-        setTheme(project.settings.theme)
+        setTheme(normalizeTheme(project.settings.theme))
       }
       if (project.settings.fontSize) {
         setFontSize(project.settings.fontSize)
@@ -425,7 +426,6 @@ export default function Dashboard() {
           }
 
           const docId = findFirstDocument(project.treeStructure) || project.treeStructure[0]?.id || null
-          console.log("Selected document ID:", docId)
           setSelectedNode(docId)
         }
       }
@@ -439,7 +439,8 @@ export default function Dashboard() {
   }
 
   // Replace the handleSaveProject function with this updated version
-  const handleSaveProject = async () => {
+  // isAutoSave flag prevents showing the success notification when saving in the background
+  const handleSaveProject = async (isAutoSave = false) => {
     try {
       // Create or update the project
       const updatedProject = extractCurrentProject(
@@ -447,25 +448,84 @@ export default function Dashboard() {
         projectName,
         treeData,
         documents,
-        theme || "light",
+        normalizeTheme(theme),
         fontSize,
       )
 
       // Update the current project state
       setCurrentProject(updatedProject)
 
-      // Save the project using the new ZIP-based function
-      await saveProjectZip(updatedProject)
+      // In Tauri, if we have a known file path we just silent-write it right back to disk.
+      // If we don't have a path, we fall back to saveProjectZip which triggers a native Save As dialog or browser download.
+      if (isTauri && projectFilePath) {
+        try {
+          const zip = new JSZip()
+          zip.file("project.json", new Blob([JSON.stringify(updatedProject, null, 2)], { type: "application/json" }))
 
-      // Show success notification
-      setShowSaveNotification(true)
-      setTimeout(() => {
-        setShowSaveNotification(false)
-      }, 2000)
+          const zipData = await zip.generateAsync({
+            type: "uint8array",
+            compression: "DEFLATE",
+            compressionOptions: { level: 6 },
+          })
+
+          await window.__TAURI__.fs.writeBinaryFile(projectFilePath, zipData)
+          console.log(`Auto-saved project silently to ${projectFilePath}`)
+          clearAutosaveBackup()
+
+        } catch (error) {
+          console.error("Failed background discrete save:", error)
+          if (isAutoSave) {
+            localStorage.setItem("quill-autosave-project", JSON.stringify(updatedProject))
+            console.log("Tauri auto-save fallback backed up to localStorage")
+            return
+          }
+          // If background save fails, trigger the standard save flow
+          const result = await saveProjectZip(updatedProject)
+          if (result.success && result.filePath) {
+            setProjectFilePath(result.filePath)
+          }
+          if (result.success && !isAutoSave) {
+            setShowSaveNotification(true)
+            setTimeout(() => setShowSaveNotification(false), 2000)
+          }
+          if (result.success) {
+            clearAutosaveBackup()
+          }
+        }
+      } else {
+        // Never open a native Save As dialog from background auto-save in Tauri.
+        // Keep a local backup until the user explicitly chooses where to save.
+        if (isTauri && isAutoSave && !projectFilePath) {
+          localStorage.setItem("quill-autosave-project", JSON.stringify(updatedProject))
+          console.log("Tauri auto-save backed up to localStorage (project has no file path yet)")
+          return
+        }
+
+        // Browser fallback or first-time save in Tauri (no filepath yet)
+        // Only trigger explicit save in browser if it's NOT an auto-save (otherwise it spams downloads)
+        if (!isAutoSave || (isTauri && !projectFilePath)) {
+          const result = await saveProjectZip(updatedProject)
+          if (result.success && result.filePath) {
+            setProjectFilePath(result.filePath)
+          }
+          if (result.success && !isAutoSave) {
+            setShowSaveNotification(true)
+            setTimeout(() => setShowSaveNotification(false), 2000)
+          }
+          if (result.success) {
+            clearAutosaveBackup()
+          }
+        } else if (!isTauri && isAutoSave) {
+          // For browser auto-save, we'll store it in localStorage as a backup
+          localStorage.setItem("quill-autosave-project", JSON.stringify(updatedProject))
+          console.log("Browser auto-save backed up to localStorage")
+        }
+      }
     } catch (error) {
       console.error("Failed to save project:", error)
-      // Show error notification
-      alert("Failed to save project. Please try again.")
+      if (!isAutoSave) {
+        alert("Failed to save project. Please try again.")
+      }
     }
   }
 
@@ -506,7 +566,6 @@ export default function Dashboard() {
   }
 
   const handleTreeChange = (updatedTreeData: TreeNode[]) => {
-    console.log("Tree data changed, updating state:", updatedTreeData)
     setTreeData(updatedTreeData)
 
     const allowed = new Set(collectDocIds(updatedTreeData))
@@ -556,134 +615,41 @@ export default function Dashboard() {
 <head>
   <meta charset="utf-8">
   <title>${projectName}</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 0 auto; padding: 2rem; line-height: 1.6; }
-    h1, h2, h3, h4, h5, h6 { margin-top: 1.5rem; }
-  </style>
 </head>
 <body>
 ${compiledContent}
 </body>
 </html>`
 
-    if (isTauri) {
-      try {
+    try {
+      // Convert the HTML to a DOCX Blob
+      const docxBuffer = await HTMLToDOCX(fullHtml, null, {
+        title: projectName,
+        creator: "Ink & Quill"
+      })
+      const blob = new Blob([docxBuffer], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" })
+
+      if (isTauri) {
         const selectedPath = await window.__TAURI__.dialog.save({
-          filters: [{ name: "HTML Document", extensions: ["html"] }],
-          defaultPath: `${projectName}.html`,
+          filters: [{ name: "Word Document", extensions: ["docx"] }],
+          defaultPath: `${projectName}.docx`,
         })
         if (selectedPath) {
-          await window.__TAURI__.fs.writeTextFile(selectedPath, fullHtml)
+          // Tauri fs needs a Uint8Array, so we convert the Blob via ArrayBuffer
+          const arrayBuffer = await blob.arrayBuffer()
+          const uint8Array = new Uint8Array(arrayBuffer)
+          await window.__TAURI__.fs.writeBinaryFile(selectedPath, uint8Array)
           setShowSaveNotification(true)
           setTimeout(() => setShowSaveNotification(false), 2000)
         }
-      } catch (error) {
-        console.error("Compile error:", error)
-        alert("Failed to export manuscript.")
-      }
-    } else {
-      const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" })
-      saveAs(blob, `${projectName}.html`)
-      setShowSaveNotification(true)
-      setTimeout(() => setShowSaveNotification(false), 2000)
-    }
-  }
-
-  // Keep the handleCreateNote function for potential future use
-  const handleCreateNote = (title: string, content: string) => {
-    // Generate a unique ID for the new note
-    const newId = `note-${Date.now()}`
-
-    // Create a new document
-    const now = new Date().toISOString()
-    const newDocuments = {
-      ...documents,
-      [newId]: {
-        content: `<p>${content}</p>`,
-        synopsis: content,
-        notes: "",
-        status: "to-do",
-        label: "none",
-        wordCount: content.split(/\s+/).filter(Boolean).length,
-        createdAt: now,
-        lastModified: now,
-      },
-    }
-    setDocuments(newDocuments)
-
-    // Add the new document to the tree structure at the root level
-    const newTreeData = [
-      ...treeData,
-      {
-        id: newId,
-        label: title,
-        type: "document",
-      },
-    ]
-    setTreeData(newTreeData)
-
-    // Select the new note
-    setSelectedNode(newId)
-  }
-
-  // Keep the handleDeleteNote function for potential future use
-  const handleDeleteNote = (id: string) => {
-    try {
-      // Check if the ID exists in documents - but don't return an error if it doesn't
-      const documentExists = !!documents[id]
-
-      // If document exists, remove it from documents state
-      const newDocuments = { ...documents }
-      if (documentExists) {
-        delete newDocuments[id]
-      }
-
-      // Remove the node from the tree structure
-      // This is a safer implementation that won't cause infinite recursion
-      const removeNodeFromTree = (nodes: TreeNode[]): TreeNode[] => {
-        return nodes
-          .map((node) => {
-            // If this is the node to remove, return null to filter it out later
-            if (node.id === id) {
-              return null
-            }
-
-            // If this node has children, process them recursively
-            if (node.children && node.children.length > 0) {
-              const newChildren = removeNodeFromTree(node.children).filter(Boolean) as TreeNode[]
-              return { ...node, children: newChildren }
-            }
-
-            // Otherwise, return the node unchanged
-            return node
-          })
-          .filter(Boolean) as TreeNode[] // Filter out null values
-      }
-
-      const newTreeData = removeNodeFromTree([...treeData])
-
-      // Find a new node to select BEFORE updating state
-      let newSelectedNode = selectedNode
-      if (selectedNode === id) {
-        // Find the first available document ID or use a default
-        const availableDocIds = Object.keys(newDocuments)
-        newSelectedNode = availableDocIds.length > 0 ? availableDocIds[0] : ""
-      }
-
-      // Update state in the correct order
-      if (documentExists) {
-        setDocuments(newDocuments)
-      }
-      setTreeData(newTreeData)
-
-      // Only update selected node if needed and if we have a valid node to select
-      if (selectedNode === id && newSelectedNode) {
-        setSelectedNode(newSelectedNode)
+      } else {
+        saveAs(blob, `${projectName}.docx`)
+        setShowSaveNotification(true)
+        setTimeout(() => setShowSaveNotification(false), 2000)
       }
     } catch (error) {
-      console.error("Error deleting note:", error)
-      // Show error notification to user
-      alert("An error occurred while deleting the note. Please try again.")
+      console.error("Compile error:", error)
+      alert("Failed to export manuscript.")
     }
   }
 
@@ -694,79 +660,25 @@ ${compiledContent}
 
   // Sidebar content
   const sidebarContent = (
-    <div className={`h-full flex flex-col ${getSidebarClass()}`}>
-      <div className={`p-2 border-b ${theme === "muted-elegance" ? "border-[#666666]" : "dark:border-gray-800"}`}>
-        {isEditingProjectName ? (
-          <div className="flex items-center gap-2">
-            <Input
-              value={editedProjectName}
-              onChange={(e) => setEditedProjectName(e.target.value)}
-              className="h-9"
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  handleSaveProjectName()
-                } else if (e.key === "Escape") {
-                  setIsEditingProjectName(false)
-                }
-              }}
-            />
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleSaveProjectName}>
-              <Check className="h-4 w-4" />
-            </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setIsEditingProjectName(false)}>
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between">
-            <Button
-              variant="outline"
-              className="flex-1 justify-start overflow-hidden"
-              onClick={() => {
-                if (currentProject) {
-                  setIsEditingProjectName(true)
-                  setEditedProjectName(projectName)
-                }
-              }}
-            >
-              <Book className="h-4 w-4 mr-2 flex-shrink-0" />
-              <span className="truncate">{projectName}</span>
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="ml-1 h-8 w-8"
-              onClick={() => {
-                setIsEditingProjectName(true)
-                setEditedProjectName(projectName)
-              }}
-            >
-              <Pencil className="h-4 w-4" />
-            </Button>
-          </div>
-        )}
-      </div>
-      <div className="flex-1 overflow-hidden">
-        <FileSidebar
-          initialTree={treeData || []}
-          onTreeChange={handleTreeChange}
-          selectedNode={selectedNode}
-          onNodeSelect={setSelectedNode}
-          documents={documents}
-        />
-      </div>
+    <div className="h-full min-h-0 overflow-hidden pane-surface">
+      <FileSidebar
+        initialTree={treeData || []}
+        onTreeChange={handleTreeChange}
+        selectedNode={selectedNode || ""}
+        onNodeSelect={setSelectedNode}
+        documents={documents}
+      />
     </div>
   )
 
   // Main content - remove the corkboard view
   const mainContent = (
     <>
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
         {viewMode === "document" && (
-          <div className="flex-1 flex flex-col overflow-hidden view-transition entered">
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden view-transition entered">
             <TiptapEditor
-              selectedNode={selectedNode}
+              selectedNode={selectedNode || ""}
               onContentChange={(content) => {
                 if (selectedNode) {
                   // Calculate word count from the HTML content
@@ -779,7 +691,6 @@ ${compiledContent}
                   setDocuments((prev) => {
                     // Create a new document if it doesn't exist
                     if (!prev[selectedNode]) {
-                      console.log(`Creating new document for ${selectedNode}`)
                       return {
                         ...prev,
                         [selectedNode]: {
@@ -797,7 +708,6 @@ ${compiledContent}
 
                     // Update existing document if content has changed
                     if (prev[selectedNode].content !== content) {
-                      console.log(`Updating content for ${selectedNode}`)
                       return {
                         ...prev,
                         [selectedNode]: {
@@ -813,16 +723,16 @@ ${compiledContent}
                   })
                 }
               }}
-              initialContent={selectedNode && documents[selectedNode]?.content}
+              initialContent={selectedNode ? documents[selectedNode]?.content : undefined}
             />
           </div>
         )}
         {viewMode === "outliner" && (
-          <div className="flex-1 flex flex-col overflow-hidden view-transition entered">
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden view-transition entered">
             <Outliner
               treeData={treeData}
               documents={documents}
-              selectedNode={selectedNode}
+              selectedNode={selectedNode || ""}
               onNodeSelect={setSelectedNode}
               onDocumentUpdate={(id, data) => {
                 setDocuments((prev) => ({
@@ -839,139 +749,198 @@ ${compiledContent}
         )}
       </div>
       <div
-        className={`w-64 border-l ${getSidebarClass()}`}
-        style={{ borderColor: theme === "muted-elegance" ? "#666666" : "" }}
+        className="min-h-0 border-l border-white/10 transition-all duration-300 ease-in-out"
+        style={{
+          width: focusMode ? "0px" : "18.5rem",
+          opacity: focusMode ? 0 : 1,
+          overflow: "hidden",
+        }}
       >
-        <Inspector
-          selectedNode={selectedNode}
-          documents={documents}
-          onDocumentUpdate={(id, data) => {
-            setDocuments((prev) => ({
-              ...prev,
-              [id]: {
-                ...(prev[id] || {}),
-                ...data,
-                lastModified: new Date().toISOString(),
-              },
-            }))
-          }}
-        />
+        <div className="h-full min-h-0 w-[18.5rem] p-2 pl-3">
+          <GlassPanel className="pane-surface h-full min-h-0 overflow-hidden rounded-2xl">
+            <Inspector
+              selectedNode={selectedNode || ""}
+              documents={documents}
+              onDocumentUpdate={(id, data) => {
+                setDocuments((prev) => ({
+                  ...prev,
+                  [id]: {
+                    ...(prev[id] || {}),
+                    ...data,
+                    lastModified: new Date().toISOString(),
+                  },
+                }))
+              }}
+            />
+          </GlassPanel>
+        </div>
       </div>
     </>
   )
 
   return (
-    <div className="flex h-screen flex-col">
-      <header className={`border-b ${getHeaderClass()}`}>
-        <div className="flex h-14 items-center px-4 justify-between">
-          <div className="flex items-center">
-            <InkAndQuillLogo className="h-6 w-6 mr-2" />
-            <h1 className="text-lg font-semibold font-cursive" style={{ fontFamily: "var(--font-dancing-script)" }}>
-              Ink & Quill
-            </h1>
-          </div>
-          <div className="flex items-center">
-            <Separator orientation="vertical" className="mx-2 h-6" />
-            <div className="flex items-center space-x-1 ml-2">
-              <TooltipProvider>
-                <DropdownMenu>
+    <div className={cn("app-shell app-workspace flex min-h-0 flex-col", isTauri && "tauri-desktop")}>
+      <header className="px-3 pt-3 pb-2">
+        <div className="px-3 py-2">
+          <TooltipProvider>
+            <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <div className="flex items-center gap-2 px-1">
+                  <InkAndQuillLogo className="h-5 w-5" />
+                  <h1 className="text-sm font-semibold tracking-wide font-cursive" style={{ fontFamily: "var(--font-dancing-script)" }}>
+                    Ink & Quill
+                  </h1>
+                </div>
+
+                <GlassToolbarGroup>
+                  <DropdownMenu>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <DropdownMenuTrigger asChild>
+                          <GlassIconButton aria-label="Project options">
+                            <FolderOpen className="h-4 w-4" />
+                          </GlassIconButton>
+                        </DropdownMenuTrigger>
+                      </TooltipTrigger>
+                      <TooltipContent>Project Options</TooltipContent>
+                    </Tooltip>
+                    <DropdownMenuContent align="start" className="w-56">
+                      <DropdownMenuItem onClick={handleNewProject}>
+                        <FileText className="mr-2 h-4 w-4" />
+                        <span>New Project</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={handleOpenProjectFile}>
+                        <FolderOpen className="mr-2 h-4 w-4" />
+                        <span>Open Project</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onClick={() => {
+                          setCurrentProject(null)
+                          setProjectFilePath(null)
+                        }}
+                      >
+                        <LogOut className="mr-2 h-4 w-4" />
+                        <span>Return to Welcome Screen</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon">
-                          <FolderOpen className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
+                      <GlassIconButton onClick={() => handleSaveProject(false)} aria-label="Save project">
+                        <Save className="h-4 w-4" />
+                      </GlassIconButton>
                     </TooltipTrigger>
-                    <TooltipContent>Project Options</TooltipContent>
+                    <TooltipContent>Save Project</TooltipContent>
                   </Tooltip>
-                  <DropdownMenuContent align="end" className="w-56">
-                    <DropdownMenuItem onClick={handleNewProject}>
-                      <FileText className="mr-2 h-4 w-4" />
-                      <span>New Project</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={handleOpenProjectFile}>
-                      <FolderOpen className="mr-2 h-4 w-4" />
-                      <span>Open Project</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => setCurrentProject(null)}>
-                      <LogOut className="mr-2 h-4 w-4" />
-                      <span>Return to Welcome Screen</span>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </TooltipProvider>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" onClick={handleSaveProject}>
-                      <Save className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Save Project</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" onClick={handleCompile}>
-                      <Printer className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Compile Manuscript</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}>
-                      <Settings className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Settings</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
-          </div>
-        </div>
-        <div
-          className={`flex items-center px-4 h-10 border-t ${theme === "muted-elegance" ? "border-[#666666]" : "dark:border-gray-800"}`}
-        >
-          <TooltipProvider>
-            <div className="flex items-center space-x-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant={viewMode === "document" ? "secondary" : "ghost"}
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => setViewMode("document")}
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <GlassIconButton onClick={handleCompile} aria-label="Compile manuscript">
+                        <Printer className="h-4 w-4" />
+                      </GlassIconButton>
+                    </TooltipTrigger>
+                    <TooltipContent>Compile Manuscript</TooltipContent>
+                  </Tooltip>
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <GlassIconButton onClick={() => setSettingsOpen(true)} aria-label="Open settings">
+                        <Settings className="h-4 w-4" />
+                      </GlassIconButton>
+                    </TooltipTrigger>
+                    <TooltipContent>Settings</TooltipContent>
+                  </Tooltip>
+                </GlassToolbarGroup>
+              </div>
+
+              <div className="w-[420px] max-w-full justify-self-center">
+                {isEditingProjectName ? (
+                  <div className="glass-pill-title flex items-center gap-1 px-2 py-1">
+                    <Input
+                      value={editedProjectName}
+                      onChange={(e) => setEditedProjectName(e.target.value)}
+                      className="h-8 border-0 bg-transparent text-center text-sm font-medium shadow-none focus-visible:ring-0"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          handleSaveProjectName()
+                        } else if (e.key === "Escape") {
+                          setIsEditingProjectName(false)
+                        }
+                      }}
+                    />
+                    <GlassIconButton className="h-8 w-8" onClick={handleSaveProjectName} aria-label="Save project name">
+                      <Check className="h-4 w-4" />
+                    </GlassIconButton>
+                    <GlassIconButton className="h-8 w-8" onClick={() => setIsEditingProjectName(false)} aria-label="Cancel editing project name">
+                      <X className="h-4 w-4" />
+                    </GlassIconButton>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="glass-pill-title flex h-10 w-full items-center justify-center gap-2 px-4 text-sm font-medium text-foreground transition-colors hover:text-primary"
+                    onClick={() => {
+                      setIsEditingProjectName(true)
+                      setEditedProjectName(projectName)
+                    }}
+                    title="Rename project"
                   >
-                    <FileText className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Document View</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant={viewMode === "outliner" ? "secondary" : "ghost"}
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => setViewMode("outliner")}
-                  >
-                    <List className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Outliner View</TooltipContent>
-              </Tooltip>
+                    <span className="truncate">{projectName}</span>
+                    <Pencil className="h-3.5 w-3.5 opacity-70" />
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2">
+                <GlassSegmented>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <GlassIconButton
+                        active={viewMode === "document"}
+                        onClick={() => setViewMode("document")}
+                        aria-label="Document view"
+                      >
+                        <FileText className="h-4 w-4" />
+                      </GlassIconButton>
+                    </TooltipTrigger>
+                    <TooltipContent>Document View</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <GlassIconButton
+                        active={viewMode === "outliner"}
+                        onClick={() => setViewMode("outliner")}
+                        aria-label="Outliner view"
+                      >
+                        <List className="h-4 w-4" />
+                      </GlassIconButton>
+                    </TooltipTrigger>
+                    <TooltipContent>Outliner View</TooltipContent>
+                  </Tooltip>
+                </GlassSegmented>
+
+                <GlassToolbarGroup>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <GlassIconButton active={focusMode} onClick={() => setFocusMode(!focusMode)} aria-label="Toggle focus mode">
+                        {focusMode ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+                      </GlassIconButton>
+                    </TooltipTrigger>
+                    <TooltipContent>Toggle Focus Mode</TooltipContent>
+                  </Tooltip>
+                </GlassToolbarGroup>
+              </div>
             </div>
           </TooltipProvider>
         </div>
       </header>
 
-      <ResizableSidebar sidebarContent={sidebarContent}>{mainContent}</ResizableSidebar>
+      <ResizableSidebar sidebarContent={sidebarContent} isCollapsed={focusMode} defaultWidth={292} minWidth={220} maxWidth={460}>
+        {mainContent}
+      </ResizableSidebar>
 
       {showSaveNotification && (
         <div className="fixed bottom-4 right-4 bg-green-500 text-white px-4 py-2 rounded shadow-lg notification">

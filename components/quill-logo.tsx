@@ -7,13 +7,11 @@ interface QuillLogoProps {
 }
 
 export function InkAndQuillLogo({ className = "" }: QuillLogoProps) {
-  const { theme } = useTheme()
+  const { resolvedTheme } = useTheme()
 
   // Get the appropriate color based on theme
   const getColor = () => {
-    if (theme === "muted-elegance") {
-      return "#E3B5A4" // Terracotta accent color
-    } else if (theme === "dark") {
+    if (resolvedTheme === "dark") {
       return "#FFFFFF" // White for dark theme
     } else {
       return "#000000" // Black for light theme
