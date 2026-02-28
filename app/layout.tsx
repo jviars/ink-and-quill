@@ -6,7 +6,6 @@ import { ThemeProvider } from "@/components/theme-provider"
 export const metadata: Metadata = {
   title: "Ink & Quill - Writing Project Management",
   description: "Organize your writing projects from start to finish",
-  generator: "v0.app",
 }
 
 export default function RootLayout({

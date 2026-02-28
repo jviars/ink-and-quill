@@ -7,6 +7,8 @@ fn build_menu() -> Menu {
     let new_project = CustomMenuItem::new("new_project", "New Project").accelerator("CmdOrCtrl+N");
     let open_project = CustomMenuItem::new("open_project", "Open Project...").accelerator("CmdOrCtrl+O");
     let save_project = CustomMenuItem::new("save_project", "Save Project").accelerator("CmdOrCtrl+S");
+    let save_project_as =
+        CustomMenuItem::new("save_project_as", "Save Project As...").accelerator("CmdOrCtrl+Shift+S");
     let open_settings = CustomMenuItem::new("open_settings", "Settings...").accelerator("CmdOrCtrl+,");
     let toggle_fullscreen =
         CustomMenuItem::new("toggle_fullscreen", "Toggle Full Screen").accelerator("F11");
@@ -15,6 +17,7 @@ fn build_menu() -> Menu {
         .add_item(new_project)
         .add_item(open_project)
         .add_item(save_project)
+        .add_item(save_project_as)
         .add_native_item(MenuItem::Separator)
         .add_item(open_settings)
         .add_native_item(MenuItem::Separator)
@@ -52,6 +55,9 @@ fn main() {
                 }
                 "save_project" => {
                     let _ = window.emit("menu://save-project", ());
+                }
+                "save_project_as" => {
+                    let _ = window.emit("menu://save-project-as", ());
                 }
                 "open_settings" => {
                     let _ = window.emit("menu://open-settings", ());

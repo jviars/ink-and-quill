@@ -11,7 +11,7 @@
 
 import JSZip from "jszip"
 import FileSaver from "file-saver"
-import type { QuillProject } from "./project-types"
+import { normalizeProject, type QuillProject } from "./project-types"
 import { addRecentProject, loadPreferences } from "./user-preferences"
 import { isTauri } from "./environment"
 
@@ -21,15 +21,16 @@ export interface SaveProjectResult {
 }
 
 /* ---------- helpers ------------------------------------------------ */
-const toBlob = (data: unknown) => new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })
+const toProjectJson = (data: unknown) => JSON.stringify(data, null, 2)
 
 /* ---------- public API --------------------------------------------- */
 // Replace the saveProjectZip function with this enhanced version
 export async function saveProjectZip(project: QuillProject): Promise<SaveProjectResult> {
-  project.metadata.lastModified = new Date().toISOString()
+  const normalizedProject = normalizeProject(project)
+  normalizedProject.metadata.lastModified = new Date().toISOString()
 
   const zip = new JSZip()
-  zip.file("project.json", toBlob(project))
+  zip.file("project.json", toProjectJson(normalizedProject))
 
   // If your TipTap docs embed <img src="data:..."> you may want to
   // strip those out and write them under assets/ here.
@@ -38,7 +39,7 @@ export async function saveProjectZip(project: QuillProject): Promise<SaveProject
   // Get preferred directory from preferences
   const preferences = await loadPreferences()
   const preferredDirectory = preferences.projectDirectory
-  const filename = `${project.metadata.name}.quill`
+  const filename = `${normalizedProject.metadata.name}.quill`
 
   if (isTauri) {
     try {
@@ -72,7 +73,7 @@ export async function saveProjectZip(project: QuillProject): Promise<SaveProject
         console.log(`Project saved to ${fullPath}`)
 
         // Add to recent projects
-        await addRecentProject(project.metadata.name, fullPath)
+        await addRecentProject(normalizedProject.metadata.name, fullPath)
 
         return { success: true, filePath: fullPath }
       }
@@ -92,7 +93,7 @@ export async function saveProjectZip(project: QuillProject): Promise<SaveProject
 
     // For browser, we can't store the actual file path
     // but we can still add to recent projects with a placeholder path
-    await addRecentProject(project.metadata.name, `browser:${project.metadata.name}`)
+    await addRecentProject(normalizedProject.metadata.name, `browser:${normalizedProject.metadata.name}`)
 
     return { success: true, filePath: null }
   }
@@ -130,39 +131,8 @@ export async function loadProjectZip(file: File | ArrayBuffer | Uint8Array, file
     }
 
     const projectStr = await projectFile.async("text")
-    const project = JSON.parse(projectStr) as QuillProject
-
-    if (!project.metadata || !project.treeStructure || !project.documents) {
-      throw new Error("Invalid project structure in .quill archive")
-    }
-
-    // TODO: Process any assets/ folder and rehydrate embedded images
-
-    // Make sure the tree structure is properly validated
-    if (!Array.isArray(project.treeStructure) || project.treeStructure.length === 0) {
-      console.error("Invalid or empty tree structure in project file")
-      throw new Error("Invalid project structure: missing or empty tree structure")
-    }
-
-    // Ensure each node in the tree has the required properties
-    const validateTreeNode = (node: any) => {
-      if (!node.id || !node.label || !node.type) {
-        console.error("Invalid tree node:", node)
-        throw new Error("Invalid tree node structure")
-      }
-
-      if (node.children && Array.isArray(node.children)) {
-        node.children.forEach(validateTreeNode)
-      }
-    }
-
-    // Validate the tree structure
-    try {
-      project.treeStructure.forEach(validateTreeNode)
-    } catch (error) {
-      console.error("Tree structure validation failed:", error)
-      throw new Error("Invalid tree structure in project file")
-    }
+    const parsed = JSON.parse(projectStr)
+    const project = normalizeProject(parsed)
 
     // If a file path was provided, add to recent projects
     if (filePath && isTauri) {

@@ -509,6 +509,18 @@ body {
   margin-bottom: 1em;
 }
 
+.inline-comment-mark {
+  background: rgba(250, 204, 21, 0.32);
+  border-bottom: 1px solid rgba(202, 138, 4, 0.65);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.dark .inline-comment-mark {
+  background: rgba(245, 158, 11, 0.28);
+  border-bottom-color: rgba(251, 191, 36, 0.82);
+}
+
 .ProseMirror h1 {
   font-size: 1.8em;
   font-weight: bold;

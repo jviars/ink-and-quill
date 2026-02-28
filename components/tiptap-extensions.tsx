@@ -1,6 +1,6 @@
 "use client"
 
-import { Extension, Node, mergeAttributes } from "@tiptap/core"
+import { Extension, Mark, Node, mergeAttributes } from "@tiptap/core"
 import BulletList from "@tiptap/extension-bullet-list"
 import OrderedList from "@tiptap/extension-ordered-list"
 import ListItem from "@tiptap/extension-list-item"
@@ -101,6 +101,53 @@ export const PageBreak = Node.create({
           return commands.insertContent({ type: this.name })
         },
     }
+  },
+})
+
+export const CommentMark = Mark.create({
+  name: "comment",
+  inclusive: false,
+
+  addAttributes() {
+    return {
+      commentId: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("data-comment-id"),
+        renderHTML: (attributes) => {
+          if (!attributes.commentId) return {}
+          return { "data-comment-id": attributes.commentId }
+        },
+      },
+    }
+  },
+
+  parseHTML() {
+    return [{ tag: "span[data-comment-id]" }]
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return [
+      "span",
+      mergeAttributes(HTMLAttributes, {
+        class: "inline-comment-mark",
+      }),
+      0,
+    ]
+  },
+
+  addCommands() {
+    return {
+      setComment:
+        (attributes: { commentId: string }) =>
+        ({ commands }) => {
+          return commands.setMark(this.name, attributes)
+        },
+      unsetComment:
+        () =>
+        ({ commands }) => {
+          return commands.unsetMark(this.name)
+        },
+    } as any
   },
 })
 

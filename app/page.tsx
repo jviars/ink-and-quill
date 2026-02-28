@@ -3,17 +3,32 @@
 import type React from "react"
 
 import { useState, useEffect, useRef } from "react"
-import { List, Settings, FileText, Save, FolderOpen, Pencil, Check, X, Printer, Maximize, Minimize } from "lucide-react"
+import { List, Settings, FileText, Save, FolderOpen, Pencil, Check, X, Printer, Maximize, Minimize, Rows3, Target, BookOpen } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { TiptapEditor } from "@/components/tiptap-editor"
 import { Outliner } from "@/components/outliner"
 import { Inspector } from "@/components/inspector"
+import { FlowMode, type FlowModeDocument } from "@/components/flow-mode"
+import { TargetsDashboard } from "@/components/targets-dashboard"
+import { QuickReferencePane } from "@/components/quick-reference-pane"
 import { useTheme } from "next-themes"
 import { ResizableSidebar } from "@/components/resizable"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { InkAndQuillLogo } from "@/components/quill-logo"
 import { Input } from "@/components/ui/input"
-import type { QuillProject, DocumentData, TreeNode } from "@/lib/project-types"
+import {
+  type QuillProject,
+  type DocumentData,
+  type DocumentComment,
+  type DocumentSnapshot,
+  type SnapshotTrigger,
+  type ResearchItem,
+  type ResearchItemType,
+  type TargetsSettings,
+  type TreeNode,
+  type CompileOutputFormat,
+  type ProjectSettings,
+} from "@/lib/project-types"
 import FileSidebar from "@/components/file-sidebar"
 import {
   DropdownMenu,
@@ -25,19 +40,175 @@ import {
 // Import the new project-io functions
 import { saveProjectZip, loadProjectZip } from "@/lib/project-io"
 import { saveAs } from "file-saver"
-import { extractCurrentProject, createEmptyProject } from "@/lib/project-types"
+import {
+  extractCurrentProject,
+  createEmptyProject,
+  normalizeProject,
+  getDefaultProjectSettings,
+  buildMetadataDefaults,
+  findTemplateForSectionType,
+} from "@/lib/project-types"
 import { addRecentProject, loadPreferences, normalizeTheme, updatePreference, type AppTheme } from "@/lib/user-preferences"
 import HTMLToDOCX from "html-to-docx"
 import JSZip from "jszip"
 import { cn } from "@/lib/utils"
 import { GlassIconButton, GlassPanel, GlassSegmented, GlassToolbarGroup } from "@/components/glass-ui"
+import { buildCompileBundle } from "@/lib/compile-pipeline"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 // Import environment check
 import { isTauri } from "@/lib/environment"
+import {
+  appendSnapshotWithLimit,
+  computeWordCountFromHtml,
+  createSnapshotRecord,
+  htmlToPlainText,
+} from "@/lib/snapshot-utils"
+import type { EditorCommentDraft } from "@/lib/comment-utils"
 
 // Change the viewMode type to remove "corkboard"
+const applySnapshotToDocument = (
+  document: DocumentData,
+  trigger: SnapshotTrigger,
+  maxSnapshotsPerDocument: number,
+  options?: {
+    note?: string
+    includeEmptyDocuments?: boolean
+  },
+): DocumentData => {
+  const includeEmptyDocuments = options?.includeEmptyDocuments ?? false
+  if (!includeEmptyDocuments && htmlToPlainText(document.content || "").trim().length === 0) {
+    return document
+  }
+
+  const nextSnapshot = createSnapshotRecord(document, {
+    note: options?.note,
+    trigger,
+  })
+
+  const existingSnapshots = document.snapshots ?? []
+  const nextSnapshots = appendSnapshotWithLimit(existingSnapshots, nextSnapshot, maxSnapshotsPerDocument)
+  if (nextSnapshots === existingSnapshots) return document
+
+  return {
+    ...document,
+    snapshots: nextSnapshots,
+    lastModified: new Date().toISOString(),
+  }
+}
+
+const applySnapshotTriggerToDocuments = (
+  sourceDocuments: Record<string, DocumentData>,
+  trigger: SnapshotTrigger,
+  maxSnapshotsPerDocument: number,
+  options?: {
+    note?: string
+    includeEmptyDocuments?: boolean
+  },
+): { documents: Record<string, DocumentData>; changed: boolean } => {
+  let changed = false
+  const nextDocuments: Record<string, DocumentData> = {}
+
+  for (const [documentId, document] of Object.entries(sourceDocuments)) {
+    const nextDocument = applySnapshotToDocument(document, trigger, maxSnapshotsPerDocument, options)
+    nextDocuments[documentId] = nextDocument
+    if (nextDocument !== document) {
+      changed = true
+    }
+  }
+
+  if (!changed) {
+    return { documents: sourceDocuments, changed: false }
+  }
+
+  return { documents: nextDocuments, changed: true }
+}
+
+const clampNumber = (value: number, min: number, max: number): number => {
+  if (!Number.isFinite(value)) return min
+  return Math.min(max, Math.max(min, Math.round(value)))
+}
+
+const getTodayKey = (): string => {
+  return new Date().toISOString().slice(0, 10)
+}
+
+const calculateProjectWordCount = (sourceDocuments: Record<string, DocumentData>): number => {
+  return Object.values(sourceDocuments).reduce((total, document) => total + (document.wordCount || 0), 0)
+}
+
+const insertNodeUnderParent = (nodes: TreeNode[], parentId: string | null, newNode: TreeNode): TreeNode[] => {
+  if (parentId === null) {
+    return [...nodes, newNode]
+  }
+
+  return nodes.map((node) => {
+    if (node.id === parentId && node.type === "folder") {
+      return {
+        ...node,
+        children: [...(node.children ?? []), newNode],
+      }
+    }
+    if (node.children?.length) {
+      return {
+        ...node,
+        children: insertNodeUnderParent(node.children, parentId, newNode),
+      }
+    }
+    return node
+  })
+}
+
+const inferResearchTypeFromPath = (path: string): ResearchItemType => {
+  const lowerPath = path.toLowerCase()
+  if (lowerPath.endsWith(".pdf")) return "pdf"
+  if (
+    lowerPath.endsWith(".png") ||
+    lowerPath.endsWith(".jpg") ||
+    lowerPath.endsWith(".jpeg") ||
+    lowerPath.endsWith(".gif") ||
+    lowerPath.endsWith(".webp") ||
+    lowerPath.endsWith(".bmp") ||
+    lowerPath.endsWith(".svg") ||
+    lowerPath.endsWith(".avif") ||
+    lowerPath.endsWith(".tif") ||
+    lowerPath.endsWith(".tiff")
+  ) {
+    return "image"
+  }
+  return "note"
+}
+
+const getFileNameFromPath = (path: string): string => {
+  const parts = path.split(/[\\/]/)
+  return parts[parts.length - 1] || path
+}
+
+const stripFileExtension = (name: string): string => {
+  return name.replace(/\.[^/.]+$/, "")
+}
+
+const plainTextToHtml = (value: string): string => {
+  const escaped = value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+
+  const paragraphs = escaped
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  if (paragraphs.length === 0) return ""
+  return paragraphs.map((line) => `<p>${line}</p>`).join("")
+}
+
 export default function Dashboard() {
-  const [viewMode, setViewMode] = useState<"document" | "outliner">("document")
+  const [viewMode, setViewMode] = useState<"document" | "flow" | "outliner" | "targets">("document")
   const [focusMode, setFocusMode] = useState(false)
   const [selectedNode, setSelectedNode] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
@@ -49,26 +220,55 @@ export default function Dashboard() {
   const [projectFilePath, setProjectFilePath] = useState<string | null>(null)
   const [documents, setDocuments] = useState<Record<string, DocumentData>>({})
   const [treeData, setTreeData] = useState<TreeNode[]>([])
+  const [projectSettings, setProjectSettings] = useState<ProjectSettings>(getDefaultProjectSettings())
   const [projectName, setProjectName] = useState("Untitled Project")
   const [fontSize, setFontSize] = useState("16")
+  const [compileDialogOpen, setCompileDialogOpen] = useState(false)
+  const [selectedCompilePresetId, setSelectedCompilePresetId] = useState("")
+  const [selectedCompileFormat, setSelectedCompileFormat] = useState<CompileOutputFormat>("docx")
   const [isEditingProjectName, setIsEditingProjectName] = useState(false)
   const [editedProjectName, setEditedProjectName] = useState(projectName)
   const [preferencesLoaded, setPreferencesLoaded] = useState(false)
   const [isProjectBootstrapComplete, setIsProjectBootstrapComplete] = useState(false)
   const [startupMessage, setStartupMessage] = useState<string | null>(null)
+  const [sessionStartedAt, setSessionStartedAt] = useState<string>(new Date().toISOString())
+  const [sessionStartWordCount, setSessionStartWordCount] = useState(0)
+  const [quickReferenceOpen, setQuickReferenceOpen] = useState(true)
+  const [quickReferenceNodeId, setQuickReferenceNodeId] = useState<string | null>(null)
   const bootstrappedProjectRef = useRef(false)
+  const previousProjectWordCountRef = useRef(0)
   const lastPersistedThemeRef = useRef<AppTheme | null>(null)
   const menuActionsRef = useRef({
     newProject: () => {},
     openProject: () => {},
     saveProject: () => {},
+    saveProjectAs: () => {},
     openSettings: () => {},
   })
+  const compileFormatLabels: Record<CompileOutputFormat, string> = {
+    docx: "DOCX",
+    markdown: "Markdown",
+    html: "HTML",
+    txt: "Plain Text",
+  }
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const clearAutosaveBackup = () => {
     if (typeof window !== "undefined") {
-      localStorage.removeItem("quill-autosave-project")
+      try {
+        localStorage.removeItem("quill-autosave-project")
+      } catch (error) {
+        console.warn("Failed to clear autosave backup:", error)
+      }
+    }
+  }
+
+  const writeAutosaveBackup = (project: QuillProject) => {
+    if (typeof window === "undefined") return
+    try {
+      localStorage.setItem("quill-autosave-project", JSON.stringify(project))
+    } catch (error) {
+      console.error("Failed to persist autosave backup:", error)
     }
   }
 
@@ -116,6 +316,20 @@ export default function Dashboard() {
 
     lastPersistedThemeRef.current = normalized
   }, [preferencesLoaded, theme])
+
+  useEffect(() => {
+    if (projectSettings.compilePresets.length === 0) return
+
+    const isSelectedValid = projectSettings.compilePresets.some((preset) => preset.id === selectedCompilePresetId)
+    if (!isSelectedValid) {
+      const fallbackId = projectSettings.defaultCompilePresetId || projectSettings.compilePresets[0].id
+      setSelectedCompilePresetId(fallbackId)
+      const fallbackPreset = projectSettings.compilePresets.find((preset) => preset.id === fallbackId)
+      if (fallbackPreset?.outputFormat) {
+        setSelectedCompileFormat(fallbackPreset.outputFormat)
+      }
+    }
+  }, [projectSettings.compilePresets, projectSettings.defaultCompilePresetId, selectedCompilePresetId])
 
   const showProjectSavedNotification = () => {
     setShowSaveNotification(true)
@@ -165,29 +379,84 @@ export default function Dashboard() {
     return firstDocument
   }
 
+  const findNodeById = (nodes: TreeNode[], nodeId: string): TreeNode | null => {
+    for (const node of nodes) {
+      if (node.id === nodeId) return node
+      if (node.children?.length) {
+        const found = findNodeById(node.children, nodeId)
+        if (found) return found
+      }
+    }
+    return null
+  }
+
+  const createDocumentForNode = (node: TreeNode, settings: ProjectSettings): DocumentData => {
+    const now = new Date().toISOString()
+    const isResearchNode = node.sectionType === "research"
+    const template =
+      (node.metadataTemplateId
+        ? settings.metadataTemplates.find((entry) => entry.id === node.metadataTemplateId) ?? null
+        : null) ?? findTemplateForSectionType(settings.metadataTemplates, node.sectionType ?? "scene")
+    const metadata = buildMetadataDefaults(settings.metadataFields, template)
+
+    return {
+      content: "",
+      synopsis: "",
+      notes: "",
+      wordTarget: settings.targetsSettings.defaultDocumentWordTarget,
+      research: isResearchNode
+        ? {
+            type: "note",
+            importedAt: now,
+          }
+        : undefined,
+      snapshots: [],
+      comments: [],
+      status: typeof metadata.status === "string" ? metadata.status : "to-do",
+      label: typeof metadata.label === "string" ? metadata.label : "none",
+      keywords: typeof metadata.keywords === "string" ? metadata.keywords : "",
+      metadata,
+      wordCount: 0,
+      createdAt: now,
+      lastModified: now,
+    }
+  }
+
   const applyProjectToState = (project: QuillProject, filePath: string | null, preferredNodeId?: string | null) => {
-    const safeName = normalizeProjectName(project.metadata?.name)
-    const selectedId = preferredNodeId ?? findPreferredDocumentId(project.treeStructure)
+    const normalizedProject = normalizeProject(project)
+    const safeName = normalizeProjectName(normalizedProject.metadata?.name)
+    const selectedId = preferredNodeId ?? findPreferredDocumentId(normalizedProject.treeStructure)
+    const projectWordCount = calculateProjectWordCount(normalizedProject.documents || {})
 
     setCurrentProject({
-      ...project,
+      ...normalizedProject,
       metadata: {
-        ...project.metadata,
+        ...normalizedProject.metadata,
         name: safeName,
       },
     })
     setProjectName(safeName)
-    setTreeData(project.treeStructure)
-    setDocuments(project.documents || {})
+    setTreeData(normalizedProject.treeStructure)
+    setDocuments(normalizedProject.documents || {})
+    setProjectSettings(normalizedProject.settings)
     setSelectedNode(selectedId)
+    setQuickReferenceNodeId(null)
     setProjectFilePath(filePath)
+    setSessionStartedAt(new Date().toISOString())
+    setSessionStartWordCount(projectWordCount)
+    previousProjectWordCountRef.current = projectWordCount
     clearAutosaveBackup()
 
-    if (project.settings.theme) {
-      setTheme(normalizeTheme(project.settings.theme))
+    const defaultPresetId = normalizedProject.settings.defaultCompilePresetId || normalizedProject.settings.compilePresets[0]?.id || ""
+    setSelectedCompilePresetId(defaultPresetId)
+    const preset = normalizedProject.settings.compilePresets.find((entry) => entry.id === defaultPresetId)
+    setSelectedCompileFormat((preset?.outputFormat as CompileOutputFormat) ?? "docx")
+
+    if (normalizedProject.settings.theme) {
+      setTheme(normalizeTheme(normalizedProject.settings.theme))
     }
-    if (project.settings.fontSize) {
-      setFontSize(project.settings.fontSize)
+    if (normalizedProject.settings.fontSize) {
+      setFontSize(normalizedProject.settings.fontSize)
     }
   }
 
@@ -422,20 +691,93 @@ export default function Dashboard() {
     }, 3000)
 
     return () => clearTimeout(timer)
-  }, [treeData, documents, theme, fontSize, projectName])
+  }, [treeData, documents, theme, fontSize, projectName, projectSettings])
+
+  useEffect(() => {
+    if (!currentProject || !mounted) return
+
+    const snapshotSettings = projectSettings.snapshotSettings
+    if (!snapshotSettings.enabled || !snapshotSettings.autoOnInterval) return
+
+    const intervalMs = snapshotSettings.intervalMinutes * 60 * 1000
+    const timer = window.setInterval(() => {
+      setDocuments((prev) => {
+        const result = applySnapshotTriggerToDocuments(
+          prev,
+          "interval",
+          snapshotSettings.maxSnapshotsPerDocument,
+          { includeEmptyDocuments: false },
+        )
+        return result.changed ? result.documents : prev
+      })
+    }, intervalMs)
+
+    return () => {
+      window.clearInterval(timer)
+    }
+  }, [
+    currentProject,
+    mounted,
+    projectSettings.snapshotSettings.enabled,
+    projectSettings.snapshotSettings.autoOnInterval,
+    projectSettings.snapshotSettings.intervalMinutes,
+    projectSettings.snapshotSettings.maxSnapshotsPerDocument,
+  ])
+
+  useEffect(() => {
+    if (!currentProject || !mounted) return
+
+    const currentProjectWords = calculateProjectWordCount(documents)
+    const previousProjectWords = previousProjectWordCountRef.current
+    const delta = currentProjectWords - previousProjectWords
+
+    if (delta > 0) {
+      const todayKey = getTodayKey()
+      setProjectSettings((previousSettings) => {
+        const previousToday = previousSettings.targetsSettings.dailyWordHistory[todayKey] ?? 0
+        return {
+          ...previousSettings,
+          targetsSettings: {
+            ...previousSettings.targetsSettings,
+            dailyWordHistory: {
+              ...previousSettings.targetsSettings.dailyWordHistory,
+              [todayKey]: previousToday + delta,
+            },
+          },
+        }
+      })
+    }
+
+    previousProjectWordCountRef.current = currentProjectWords
+  }, [documents, currentProject, mounted])
 
   // Replace the handleSaveProject function with this updated version
   // isAutoSave flag prevents showing the success notification when saving in the background
   const handleSaveProject = async (isAutoSave = false) => {
     try {
+      let documentsForSave = documents
+      if (!isAutoSave && projectSettings.snapshotSettings.enabled && projectSettings.snapshotSettings.autoOnManualSave) {
+        const result = applySnapshotTriggerToDocuments(
+          documents,
+          "manual-save",
+          projectSettings.snapshotSettings.maxSnapshotsPerDocument,
+          { includeEmptyDocuments: false },
+        )
+        if (result.changed) {
+          documentsForSave = result.documents
+          setDocuments(result.documents)
+        }
+      }
+
       // Create or update the project
       const updatedProject = extractCurrentProject(
         currentProject,
         projectName,
         treeData,
-        documents,
+        documentsForSave,
         normalizeTheme(theme),
         fontSize,
+        projectSettings,
       )
 
       // Update the current project state
@@ -446,7 +788,7 @@ export default function Dashboard() {
       if (isTauri && projectFilePath) {
         try {
           const zip = new JSZip()
-          zip.file("project.json", new Blob([JSON.stringify(updatedProject, null, 2)], { type: "application/json" }))
+          zip.file("project.json", JSON.stringify(updatedProject, null, 2))
 
           const zipData = await zip.generateAsync({
             type: "uint8array",
@@ -461,7 +803,7 @@ export default function Dashboard() {
         } catch (error) {
           console.error("Failed background discrete save:", error)
           if (isAutoSave) {
-            localStorage.setItem("quill-autosave-project", JSON.stringify(updatedProject))
+            writeAutosaveBackup(updatedProject)
             console.log("Tauri auto-save fallback backed up to localStorage")
             return
           }
@@ -482,7 +824,7 @@ export default function Dashboard() {
         // Never open a native Save As dialog from background auto-save in Tauri.
         // Keep a local backup until the user explicitly chooses where to save.
         if (isTauri && isAutoSave && !projectFilePath) {
-          localStorage.setItem("quill-autosave-project", JSON.stringify(updatedProject))
+          writeAutosaveBackup(updatedProject)
           console.log("Tauri auto-save backed up to localStorage (project has no file path yet)")
           return
         }
@@ -503,7 +845,7 @@ export default function Dashboard() {
           }
         } else if (!isTauri && isAutoSave) {
           // For browser auto-save, we'll store it in localStorage as a backup
-          localStorage.setItem("quill-autosave-project", JSON.stringify(updatedProject))
+          writeAutosaveBackup(updatedProject)
           console.log("Browser auto-save backed up to localStorage")
         }
       }
@@ -512,6 +854,60 @@ export default function Dashboard() {
       if (!isAutoSave) {
         alert("Failed to save project. Please try again.")
       }
+    }
+  }
+
+  const handleSaveProjectAs = async () => {
+    try {
+      const updatedProject = extractCurrentProject(
+        currentProject,
+        projectName,
+        treeData,
+        documents,
+        normalizeTheme(theme),
+        fontSize,
+        projectSettings,
+      )
+
+      setCurrentProject(updatedProject)
+
+      if (isTauri && window.__TAURI__?.dialog?.save && window.__TAURI__?.fs?.writeBinaryFile) {
+        const suggestedName = `${normalizeProjectName(updatedProject.metadata.name)}.quill`
+        const selectedPath = await window.__TAURI__.dialog.save({
+          filters: [{ name: "Quill Project", extensions: ["quill"] }],
+          defaultPath: suggestedName,
+        })
+
+        if (!selectedPath) return
+
+        const zip = new JSZip()
+        zip.file("project.json", JSON.stringify(updatedProject, null, 2))
+
+        const zipData = await zip.generateAsync({
+          type: "uint8array",
+          compression: "DEFLATE",
+          compressionOptions: { level: 6 },
+        })
+
+        await window.__TAURI__.fs.writeBinaryFile(selectedPath, zipData)
+        await addRecentProject(updatedProject.metadata.name, selectedPath)
+        setProjectFilePath(selectedPath)
+        clearAutosaveBackup()
+        showProjectSavedNotification()
+        return
+      }
+
+      const result = await saveProjectZip(updatedProject)
+      if (result.success && result.filePath) {
+        setProjectFilePath(result.filePath)
+      }
+      if (result.success) {
+        clearAutosaveBackup()
+        showProjectSavedNotification()
+      }
+    } catch (error) {
+      console.error("Failed to save project as:", error)
+      alert(`Failed to save project: ${error instanceof Error ? error.message : "Unknown error"}`)
     }
   }
 
@@ -551,91 +947,566 @@ export default function Dashboard() {
     return acc
   }
 
-  const handleTreeChange = (updatedTreeData: TreeNode[]) => {
-    setTreeData(updatedTreeData)
-
-    const allowed = new Set(collectDocIds(updatedTreeData))
-
-    // prune documents that no longer exist in binder
-    setDocuments((prev) => {
-      const next: typeof prev = {}
-      for (const [id, doc] of Object.entries(prev)) {
-        if (allowed.has(id)) next[id] = doc
+  const collectFlowDocuments = (
+    nodes: TreeNode[],
+    sourceDocuments: Record<string, DocumentData>,
+    acc: FlowModeDocument[] = [],
+  ): FlowModeDocument[] => {
+    for (const node of nodes) {
+      if (node.type === "document") {
+        const doc = sourceDocuments[node.id]
+        acc.push({
+          id: node.id,
+          title: node.label || "Untitled Document",
+          content: doc?.content || "",
+        })
       }
-      return next
+      if (node.children?.length) {
+        collectFlowDocuments(node.children, sourceDocuments, acc)
+      }
+    }
+    return acc
+  }
+
+  const resolveInsertParentId = (nodes: TreeNode[], preferredParentId: string | null): string | null => {
+    if (preferredParentId) {
+      const candidateParent = findNodeById(nodes, preferredParentId)
+      if (candidateParent?.type === "folder") {
+        return preferredParentId
+      }
+    }
+
+    const rootFolder = nodes.find((node) => node.type === "folder" && node.id === "root")
+    if (rootFolder) return rootFolder.id
+
+    const firstFolder = nodes.find((node) => node.type === "folder")
+    return firstFolder?.id ?? null
+  }
+
+  const createResearchDocument = (
+    label: string,
+    itemType: ResearchItemType,
+    options?: {
+      sourcePath?: string
+      sourceUrl?: string
+      sourceName?: string
+      indexedText?: string
+      initialText?: string
+    },
+  ): { node: TreeNode; document: DocumentData } => {
+    const now = new Date().toISOString()
+    const documentId = `research-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const template = findTemplateForSectionType(projectSettings.metadataTemplates, "research")
+    const metadata = buildMetadataDefaults(projectSettings.metadataFields, template)
+    const noteText = options?.initialText?.trim() || ""
+    const indexedText = options?.indexedText || (noteText ? noteText.slice(0, 4000) : undefined)
+    const content = noteText ? plainTextToHtml(noteText) : ""
+    const wordCount = noteText
+      ? noteText
+        .split(/\s+/)
+        .map((entry) => entry.trim())
+        .filter(Boolean).length
+      : 0
+
+    return {
+      node: {
+        id: documentId,
+        label,
+        type: "document",
+        sectionType: "research",
+        includeInCompile: false,
+        metadataTemplateId: template?.id ?? null,
+      },
+      document: {
+        content,
+        synopsis: "",
+        notes: "",
+        wordTarget: projectSettings.targetsSettings.defaultDocumentWordTarget,
+        research: {
+          type: itemType,
+          sourcePath: options?.sourcePath,
+          sourceUrl: options?.sourceUrl,
+          sourceName: options?.sourceName,
+          indexedText,
+          importedAt: now,
+        },
+        snapshots: [],
+        comments: [],
+        status: typeof metadata.status === "string" ? metadata.status : "draft",
+        label: typeof metadata.label === "string" ? metadata.label : "reference",
+        keywords: typeof metadata.keywords === "string" ? metadata.keywords : "research",
+        metadata,
+        wordCount,
+        createdAt: now,
+        lastModified: now,
+      },
+    }
+  }
+
+  const handleCreateResearchItem = (preferredParentId: string | null, itemType: ResearchItemType) => {
+    let sourceUrl: string | undefined
+    let label = itemType === "link" ? "Research Link" : "Research Note"
+
+    if (itemType === "link") {
+      const response = window.prompt("Enter the reference URL", "https://")
+      if (response === null) return
+      const trimmedUrl = response.trim()
+      sourceUrl = trimmedUrl || undefined
+      if (trimmedUrl) {
+        try {
+          const parsed = new URL(trimmedUrl)
+          if (parsed.hostname) {
+            label = parsed.hostname.replace(/^www\./, "")
+          }
+        } catch {
+          label = "Research Link"
+        }
+      }
+    }
+
+    const { node, document } = createResearchDocument(label, itemType, {
+      sourceUrl,
+    })
+    setTreeData((prev) => {
+      const parentId = resolveInsertParentId(prev, preferredParentId)
+      return insertNodeUnderParent(prev, parentId, node)
+    })
+    setDocuments((prev) => ({
+      ...prev,
+      [node.id]: document,
+    }))
+    setSelectedNode(node.id)
+    setQuickReferenceNodeId(node.id)
+    setQuickReferenceOpen(true)
+  }
+
+  const handleImportResearchFiles = async (preferredParentId: string | null) => {
+    if (!isTauri || !window.__TAURI__?.dialog?.open) {
+      alert("Research file import is currently available in the desktop app.")
+      return
+    }
+
+    try {
+      const selected = await window.__TAURI__.dialog.open({
+        multiple: true,
+        filters: [
+          {
+            name: "Research Files",
+            extensions: ["pdf", "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif", "txt", "md"],
+          },
+        ],
+      })
+
+      const selectedPaths = Array.isArray(selected) ? selected : selected ? [selected] : []
+      const normalizedPaths = selectedPaths.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
+      if (normalizedPaths.length === 0) return
+
+      const nodesToInsert: TreeNode[] = []
+      const nextDocuments: Record<string, DocumentData> = {}
+
+      for (const path of normalizedPaths) {
+        const sourceName = getFileNameFromPath(path)
+        const label = stripFileExtension(sourceName) || "Research Item"
+        const itemType = inferResearchTypeFromPath(path)
+        let initialText = ""
+        let indexedText = ""
+
+        if (itemType === "note" && window.__TAURI__?.fs?.readTextFile) {
+          try {
+            const importedText = await window.__TAURI__.fs.readTextFile(path)
+            initialText = importedText.slice(0, 30000)
+            indexedText = importedText.slice(0, 4000)
+          } catch (error) {
+            console.warn("Could not index text from research file:", path, error)
+          }
+        }
+
+        const { node, document } = createResearchDocument(label, itemType, {
+          sourcePath: path,
+          sourceName,
+          indexedText: indexedText || undefined,
+          initialText: initialText || undefined,
+        })
+
+        nodesToInsert.push(node)
+        nextDocuments[node.id] = document
+      }
+
+      if (nodesToInsert.length === 0) return
+
+      setTreeData((prev) => {
+        const parentId = resolveInsertParentId(prev, preferredParentId)
+        let updated = prev
+        for (const node of nodesToInsert) {
+          updated = insertNodeUnderParent(updated, parentId, node)
+        }
+        return updated
+      })
+
+      setDocuments((prev) => ({
+        ...prev,
+        ...nextDocuments,
+      }))
+
+      const firstImportedId = nodesToInsert[0].id
+      setSelectedNode(firstImportedId)
+      setQuickReferenceNodeId(firstImportedId)
+      setQuickReferenceOpen(true)
+      showProjectSavedNotification()
+    } catch (error) {
+      console.error("Failed to import research items:", error)
+      alert(`Failed to import research: ${error instanceof Error ? error.message : "Unknown error"}`)
+    }
+  }
+
+  const handleTreeChange = (updatedTreeData: TreeNode[]) => {
+    const normalized = normalizeProject({
+      metadata: currentProject?.metadata ?? {
+        name: projectName,
+        version: "1.2.0",
+        createdAt: new Date().toISOString(),
+        lastModified: new Date().toISOString(),
+      },
+      settings: {
+        ...projectSettings,
+        theme: normalizeTheme(theme),
+        fontSize,
+      },
+      treeStructure: updatedTreeData,
+      documents,
     })
 
-    // if selected node was deleted, select another doc
+    setTreeData(normalized.treeStructure)
+    setDocuments(normalized.documents)
+    setProjectSettings(normalized.settings)
+
+    const allowed = new Set(collectDocIds(normalized.treeStructure))
     if (selectedNode && !allowed.has(selectedNode)) {
-      const firstDoc = collectDocIds(updatedTreeData)[0] ?? null
+      const firstDoc = collectDocIds(normalized.treeStructure)[0] ?? null
       setSelectedNode(firstDoc)
     }
   }
 
-  const handleCompile = async () => {
-    let compiledContent = `<h1>${projectName}</h1>\n`
-
-    const gatherContent = (nodes: TreeNode[], level = 1) => {
-      for (const node of nodes) {
-        if (node.type === "folder") {
-          compiledContent += `<h${level + 1}>${node.label}</h${level + 1}>\n`
-          if (node.children) {
-            gatherContent(node.children, level + 1)
-          }
-        } else if (node.type === "document") {
-          const doc = documents[node.id]
-          if (doc) {
-            compiledContent += `<h${level + 1}>${node.label}</h${level + 1}>\n`
-            if (doc.content) {
-              compiledContent += `${doc.content}\n`
-            }
-          }
+  const updateNodeById = (nodes: TreeNode[], nodeId: string, updater: (node: TreeNode) => TreeNode): TreeNode[] => {
+    return nodes.map((node) => {
+      if (node.id === nodeId) {
+        return updater(node)
+      }
+      if (node.children?.length) {
+        return {
+          ...node,
+          children: updateNodeById(node.children, nodeId, updater),
         }
       }
-    }
+      return node
+    })
+  }
 
-    gatherContent(treeData)
+  const handleNodeUpdate = (nodeId: string, patch: Partial<TreeNode>) => {
+    setTreeData((prev) => updateNodeById(prev, nodeId, (node) => ({ ...node, ...patch })))
+  }
 
-    const fullHtml = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>${projectName}</title>
-</head>
-<body>
-${compiledContent}
-</body>
-</html>`
+  const handleProjectSettingsUpdate = (nextSettings: ProjectSettings) => {
+    const normalized = normalizeProject({
+      metadata: currentProject?.metadata ?? {
+        name: projectName,
+        version: "1.2.0",
+        createdAt: new Date().toISOString(),
+        lastModified: new Date().toISOString(),
+      },
+      settings: {
+        ...nextSettings,
+        theme: normalizeTheme(theme),
+        fontSize,
+      },
+      treeStructure: treeData,
+      documents,
+    })
 
-    try {
-      // Convert the HTML to a DOCX Blob
-      const docxBuffer = await HTMLToDOCX(fullHtml, null, {
-        title: projectName,
-        creator: "Ink & Quill"
+    setProjectSettings(normalized.settings)
+    setTreeData(normalized.treeStructure)
+    setDocuments(normalized.documents)
+  }
+
+  const applyDocumentPatch = (documentId: string, data: Partial<DocumentData>) => {
+    setDocuments((prev) => {
+      const node = findNodeById(treeData, documentId) ?? {
+        id: documentId,
+        label: "Untitled Document",
+        type: "document" as const,
+        sectionType: "scene" as const,
+        includeInCompile: true,
+        metadataTemplateId: null,
+      }
+
+      const existing = prev[documentId] ?? createDocumentForNode(node, projectSettings)
+      const nextMetadata = {
+        ...existing.metadata,
+        ...(data.metadata || {}),
+      }
+
+      if (typeof data.status === "string") nextMetadata.status = data.status
+      if (typeof data.label === "string") nextMetadata.label = data.label
+      if (typeof data.keywords === "string") nextMetadata.keywords = data.keywords
+
+      const nextDoc: DocumentData = {
+        ...existing,
+        ...data,
+        metadata: nextMetadata,
+        status: typeof nextMetadata.status === "string" ? nextMetadata.status : existing.status,
+        label: typeof nextMetadata.label === "string" ? nextMetadata.label : existing.label,
+        keywords: typeof nextMetadata.keywords === "string" ? nextMetadata.keywords : existing.keywords,
+        lastModified: new Date().toISOString(),
+      }
+
+      return {
+        ...prev,
+        [documentId]: nextDoc,
+      }
+    })
+  }
+
+  const handleResearchItemUpdate = (documentId: string, patch: Partial<ResearchItem>) => {
+    setDocuments((prev) => {
+      const existingDocument = prev[documentId]
+      if (!existingDocument) return prev
+
+      const existingResearch = existingDocument.research ?? { type: "note" as const }
+      const nextResearch: ResearchItem = {
+        ...existingResearch,
+        ...patch,
+      }
+
+      return {
+        ...prev,
+        [documentId]: {
+          ...existingDocument,
+          research: nextResearch,
+          lastModified: new Date().toISOString(),
+        },
+      }
+    })
+  }
+
+  const handleCreateDocumentComment = (documentId: string, draft: EditorCommentDraft) => {
+    setDocuments((prev) => {
+      const existingDocument = prev[documentId]
+      if (!existingDocument) return prev
+
+      const now = new Date().toISOString()
+      const existingComments = existingDocument.comments ?? []
+      const existingIndex = existingComments.findIndex((comment) => comment.id === draft.id)
+
+      let nextComments: DocumentComment[]
+      if (existingIndex >= 0) {
+        nextComments = existingComments.map((comment) =>
+          comment.id === draft.id
+            ? {
+                ...comment,
+                text: draft.text,
+                quote: draft.quote,
+                updatedAt: now,
+              }
+            : comment,
+        )
+      } else {
+        nextComments = [
+          ...existingComments,
+          {
+            id: draft.id,
+            text: draft.text,
+            quote: draft.quote,
+            resolved: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ]
+      }
+
+      return {
+        ...prev,
+        [documentId]: {
+          ...existingDocument,
+          comments: nextComments,
+          lastModified: now,
+        },
+      }
+    })
+  }
+
+  const handleTargetsSettingsChange = (patch: Partial<TargetsSettings>) => {
+    setProjectSettings((previousSettings) => ({
+      ...previousSettings,
+      targetsSettings: {
+        ...previousSettings.targetsSettings,
+        ...patch,
+        sessionWordTarget: clampNumber(
+          patch.sessionWordTarget ?? previousSettings.targetsSettings.sessionWordTarget,
+          100,
+          500000,
+        ),
+        projectWordTarget: clampNumber(
+          patch.projectWordTarget ?? previousSettings.targetsSettings.projectWordTarget,
+          1000,
+          2000000,
+        ),
+        defaultDocumentWordTarget: clampNumber(
+          patch.defaultDocumentWordTarget ?? previousSettings.targetsSettings.defaultDocumentWordTarget,
+          100,
+          500000,
+        ),
+        dailyWordHistory: patch.dailyWordHistory ?? previousSettings.targetsSettings.dailyWordHistory,
+      },
+    }))
+  }
+
+  const handleDocumentWordTargetChange = (documentId: string, target: number) => {
+    const normalizedTarget = clampNumber(target, 100, 500000)
+    setDocuments((previousDocuments) => {
+      const existing = previousDocuments[documentId]
+      if (!existing) return previousDocuments
+      if (existing.wordTarget === normalizedTarget) return previousDocuments
+
+      return {
+        ...previousDocuments,
+        [documentId]: {
+          ...existing,
+          wordTarget: normalizedTarget,
+          lastModified: new Date().toISOString(),
+        },
+      }
+    })
+  }
+
+  const handleResetSessionTargets = () => {
+    const currentWords = calculateProjectWordCount(documents)
+    setSessionStartedAt(new Date().toISOString())
+    setSessionStartWordCount(currentWords)
+  }
+
+  const handleCreateDocumentSnapshot = (documentId: string, note?: string) => {
+    const snapshotSettings = projectSettings.snapshotSettings
+    if (!snapshotSettings.enabled) return
+
+    setDocuments((prev) => {
+      const targetDocument = prev[documentId]
+      if (!targetDocument) return prev
+
+      const nextDocument = applySnapshotToDocument(targetDocument, "manual", snapshotSettings.maxSnapshotsPerDocument, {
+        note,
+        includeEmptyDocuments: true,
       })
-      const blob = new Blob([docxBuffer], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" })
+      if (nextDocument === targetDocument) return prev
 
-      if (isTauri) {
-        const selectedPath = await window.__TAURI__.dialog.save({
-          filters: [{ name: "Word Document", extensions: ["docx"] }],
-          defaultPath: `${projectName}.docx`,
+      return {
+        ...prev,
+        [documentId]: nextDocument,
+      }
+    })
+  }
+
+  const handleRestoreDocumentSnapshot = (documentId: string, snapshot: DocumentSnapshot) => {
+    const snapshotSettings = projectSettings.snapshotSettings
+
+    setDocuments((prev) => {
+      const targetDocument = prev[documentId]
+      if (!targetDocument) return prev
+
+      let workingDocument = targetDocument
+      if (snapshotSettings.enabled && snapshotSettings.autoBeforeRestore) {
+        workingDocument = applySnapshotToDocument(
+          workingDocument,
+          "before-restore",
+          snapshotSettings.maxSnapshotsPerDocument,
+          {
+            note: `Safety snapshot before restore ${new Date().toLocaleString()}`,
+            includeEmptyDocuments: true,
+          },
+        )
+      }
+
+      const restoredDocument: DocumentData = {
+        ...workingDocument,
+        content: snapshot.content,
+        wordCount: Number.isFinite(snapshot.wordCount) ? snapshot.wordCount : computeWordCountFromHtml(snapshot.content),
+        lastModified: new Date().toISOString(),
+      }
+
+      return {
+        ...prev,
+        [documentId]: restoredDocument,
+      }
+    })
+  }
+
+  const openCompileDialog = () => {
+    const defaultPresetId = selectedCompilePresetId || projectSettings.defaultCompilePresetId || projectSettings.compilePresets[0]?.id || ""
+    setSelectedCompilePresetId(defaultPresetId)
+    const matchedPreset = projectSettings.compilePresets.find((entry) => entry.id === defaultPresetId)
+    if (matchedPreset?.outputFormat) {
+      setSelectedCompileFormat(matchedPreset.outputFormat)
+    }
+    setCompileDialogOpen(true)
+  }
+
+  const handleCompile = async () => {
+    try {
+      const projectForCompile = extractCurrentProject(
+        currentProject,
+        projectName,
+        treeData,
+        documents,
+        normalizeTheme(theme),
+        fontSize,
+        projectSettings,
+      )
+
+      const bundle = buildCompileBundle(projectForCompile, selectedCompilePresetId, selectedCompileFormat)
+      const format = bundle.outputFormat
+      const extension = format === "markdown" ? "md" : format
+
+      if (format === "docx") {
+        const docxBuffer = await HTMLToDOCX(bundle.html, null, {
+          title: bundle.title,
+          creator: "Ink & Quill",
         })
-        if (selectedPath) {
-          // Tauri fs needs a Uint8Array, so we convert the Blob via ArrayBuffer
-          const arrayBuffer = await blob.arrayBuffer()
-          const uint8Array = new Uint8Array(arrayBuffer)
+        const blob = new Blob([docxBuffer], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" })
+
+        if (isTauri) {
+          const selectedPath = await window.__TAURI__.dialog.save({
+            filters: [{ name: "Word Document", extensions: ["docx"] }],
+            defaultPath: `${bundle.fileNameBase}.docx`,
+          })
+          if (!selectedPath) return
+          const uint8Array = new Uint8Array(await blob.arrayBuffer())
           await window.__TAURI__.fs.writeBinaryFile(selectedPath, uint8Array)
-          setShowSaveNotification(true)
-          setTimeout(() => setShowSaveNotification(false), 2000)
+        } else {
+          saveAs(blob, `${bundle.fileNameBase}.docx`)
         }
       } else {
-        saveAs(blob, `${projectName}.docx`)
-        setShowSaveNotification(true)
-        setTimeout(() => setShowSaveNotification(false), 2000)
+        const content = format === "markdown" ? bundle.markdown : format === "html" ? bundle.html : bundle.text
+        const mimeType = format === "html" ? "text/html;charset=utf-8" : "text/plain;charset=utf-8"
+
+        if (isTauri) {
+          const selectedPath = await window.__TAURI__.dialog.save({
+            filters: [{ name: `${format.toUpperCase()} File`, extensions: [extension] }],
+            defaultPath: `${bundle.fileNameBase}.${extension}`,
+          })
+          if (!selectedPath) return
+          await window.__TAURI__.fs.writeTextFile({ path: selectedPath, contents: content })
+        } else {
+          const blob = new Blob([content], { type: mimeType })
+          saveAs(blob, `${bundle.fileNameBase}.${extension}`)
+        }
       }
+
+      setCurrentProject(projectForCompile)
+      setProjectSettings(projectForCompile.settings)
+      setCompileDialogOpen(false)
+      showProjectSavedNotification()
     } catch (error) {
       console.error("Compile error:", error)
-      alert("Failed to export manuscript.")
+      alert(`Failed to compile project: ${error instanceof Error ? error.message : "Unknown error"}`)
     }
   }
 
@@ -648,11 +1519,14 @@ ${compiledContent}
       saveProject: () => {
         void handleSaveProject(false)
       },
+      saveProjectAs: () => {
+        void handleSaveProjectAs()
+      },
       openSettings: () => {
         setSettingsOpen(true)
       },
     }
-  }, [handleNewProject, handleOpenProjectFile, handleSaveProject])
+  }, [handleNewProject, handleOpenProjectFile, handleSaveProject, handleSaveProjectAs])
 
   useEffect(() => {
     if (!isTauri || typeof window === "undefined") return
@@ -670,6 +1544,7 @@ ${compiledContent}
           listen("menu://new-project", () => menuActionsRef.current.newProject()),
           listen("menu://open-project", () => menuActionsRef.current.openProject()),
           listen("menu://save-project", () => menuActionsRef.current.saveProject()),
+          listen("menu://save-project-as", () => menuActionsRef.current.saveProjectAs()),
           listen("menu://open-settings", () => menuActionsRef.current.openSettings()),
         ])
 
@@ -692,9 +1567,23 @@ ${compiledContent}
     }
   }, [])
 
+  useEffect(() => {
+    if (!selectedNode) return
+    const selectedTreeNode = findNodeById(treeData, selectedNode)
+    if (!selectedTreeNode || selectedTreeNode.type !== "document") return
+    const selectedDocument = documents[selectedNode]
+    if (selectedTreeNode.sectionType === "research" || selectedDocument?.research) {
+      setQuickReferenceNodeId(selectedNode)
+      setQuickReferenceOpen(true)
+    }
+  }, [selectedNode, treeData, documents])
+
   if (!preferencesLoaded || !isProjectBootstrapComplete || !currentProject) {
     return <div className={cn("app-shell app-workspace", isTauri && "tauri-desktop")} />
   }
+
+  const selectedTreeNode = selectedNode ? findNodeById(treeData, selectedNode) : null
+  const flowDocuments = collectFlowDocuments(treeData, documents)
 
   // Sidebar content
   const sidebarContent = (
@@ -705,6 +1594,8 @@ ${compiledContent}
         selectedNode={selectedNode || ""}
         onNodeSelect={setSelectedNode}
         documents={documents}
+        onCreateResearchItem={handleCreateResearchItem}
+        onImportResearchFiles={handleImportResearchFiles}
       />
     </div>
   )
@@ -714,54 +1605,124 @@ ${compiledContent}
     <>
       <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
         {viewMode === "document" && (
+          <div className="flex-1 min-h-0 min-w-0 flex overflow-hidden view-transition entered">
+            <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
+              <TiptapEditor
+                selectedNode={selectedTreeNode?.type === "document" ? selectedNode || "" : ""}
+                onContentChange={(content) => {
+                  if (selectedNode && selectedTreeNode?.type === "document") {
+                    // Calculate word count from the HTML content
+                    const wordCount = content
+                      .replace(/<[^>]*>/g, " ") // Remove HTML tags
+                      .split(/\s+/) // Split by whitespace
+                      .filter(Boolean).length // Remove empty strings
+
+                    // Use functional update to ensure we're working with latest state
+                    setDocuments((prev) => {
+                      // Create a new document if it doesn't exist
+                      if (!prev[selectedNode]) {
+                        const node = findNodeById(treeData, selectedNode)
+                        const defaults = node ? createDocumentForNode(node, projectSettings) : createDocumentForNode({
+                          id: selectedNode,
+                          label: "Untitled Document",
+                          type: "document",
+                          sectionType: "scene",
+                          includeInCompile: true,
+                          metadataTemplateId: null,
+                        }, projectSettings)
+                        return {
+                          ...prev,
+                          [selectedNode]: {
+                            ...defaults,
+                            content,
+                            wordCount,
+                            lastModified: new Date().toISOString(),
+                          },
+                        }
+                      }
+
+                      // Update existing document if content has changed
+                      if (prev[selectedNode].content !== content) {
+                        return {
+                          ...prev,
+                          [selectedNode]: {
+                            ...prev[selectedNode],
+                            content,
+                            wordCount,
+                            lastModified: new Date().toISOString(),
+                          },
+                        }
+                      }
+
+                      return prev
+                    })
+                  }
+                }}
+                initialContent={selectedNode && selectedTreeNode?.type === "document" ? documents[selectedNode]?.content : undefined}
+                onCommentCreate={(draft) => {
+                  if (!selectedNode || selectedTreeNode?.type !== "document") return
+                  handleCreateDocumentComment(selectedNode, draft)
+                }}
+              />
+            </div>
+
+            {quickReferenceOpen && (
+              <div className="w-[22rem] min-w-[20rem] max-w-[26rem]">
+                <QuickReferencePane
+                  treeData={treeData}
+                  documents={documents}
+                  selectedReferenceId={quickReferenceNodeId}
+                  onSelectReference={setQuickReferenceNodeId}
+                  onCreateResearchNote={() => handleCreateResearchItem(selectedTreeNode?.type === "folder" ? selectedTreeNode.id : null, "note")}
+                  onCreateResearchLink={() => handleCreateResearchItem(selectedTreeNode?.type === "folder" ? selectedTreeNode.id : null, "link")}
+                  onImportResearchFiles={() => void handleImportResearchFiles(selectedTreeNode?.type === "folder" ? selectedTreeNode.id : null)}
+                  onUpdateResearchItem={handleResearchItemUpdate}
+                />
+              </div>
+            )}
+          </div>
+        )}
+        {viewMode === "flow" && (
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden view-transition entered">
-            <TiptapEditor
-              selectedNode={selectedNode || ""}
-              onContentChange={(content) => {
-                if (selectedNode) {
-                  // Calculate word count from the HTML content
-                  const wordCount = content
-                    .replace(/<[^>]*>/g, " ") // Remove HTML tags
-                    .split(/\s+/) // Split by whitespace
-                    .filter(Boolean).length // Remove empty strings
+            <FlowMode
+              documents={flowDocuments}
+              onDocumentChange={(documentId, content) => {
+                const wordCount = content
+                  .replace(/<[^>]*>/g, " ")
+                  .split(/\s+/)
+                  .filter(Boolean).length
 
-                  // Use functional update to ensure we're working with latest state
-                  setDocuments((prev) => {
-                    // Create a new document if it doesn't exist
-                    if (!prev[selectedNode]) {
-                      return {
-                        ...prev,
-                        [selectedNode]: {
-                          content,
-                          wordCount,
-                          synopsis: "",
-                          notes: "",
-                          status: "to-do",
-                          label: "none",
-                          createdAt: new Date().toISOString(),
-                          lastModified: new Date().toISOString(),
-                        },
-                      }
-                    }
-
-                    // Update existing document if content has changed
-                    if (prev[selectedNode].content !== content) {
-                      return {
-                        ...prev,
-                        [selectedNode]: {
-                          ...prev[selectedNode],
-                          content,
-                          wordCount,
-                          lastModified: new Date().toISOString(),
-                        },
-                      }
-                    }
-
-                    return prev
-                  })
-                }
+                setDocuments((prev) => {
+                  const existingDocument = prev[documentId]
+                  if (!existingDocument) return prev
+                  if (existingDocument.content === content) return prev
+                  return {
+                    ...prev,
+                    [documentId]: {
+                      ...existingDocument,
+                      content,
+                      wordCount,
+                      lastModified: new Date().toISOString(),
+                    },
+                  }
+                })
               }}
-              initialContent={selectedNode ? documents[selectedNode]?.content : undefined}
+              onCommentCreate={handleCreateDocumentComment}
+            />
+          </div>
+        )}
+        {viewMode === "targets" && (
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden view-transition entered">
+            <TargetsDashboard
+              treeData={treeData}
+              documents={documents}
+              selectedDocumentId={selectedTreeNode?.type === "document" ? selectedNode : null}
+              targetsSettings={projectSettings.targetsSettings}
+              sessionStartedAt={sessionStartedAt}
+              sessionStartWordCount={sessionStartWordCount}
+              onTargetsSettingsChange={handleTargetsSettingsChange}
+              onDocumentTargetChange={handleDocumentWordTargetChange}
+              onResetSession={handleResetSessionTargets}
             />
           </div>
         )}
@@ -772,16 +1733,7 @@ ${compiledContent}
               documents={documents}
               selectedNode={selectedNode || ""}
               onNodeSelect={setSelectedNode}
-              onDocumentUpdate={(id, data) => {
-                setDocuments((prev) => ({
-                  ...prev,
-                  [id]: {
-                    ...(prev[id] || {}),
-                    ...data,
-                    lastModified: new Date().toISOString(),
-                  },
-                }))
-              }}
+              onDocumentUpdate={applyDocumentPatch}
             />
           </div>
         )}
@@ -798,17 +1750,15 @@ ${compiledContent}
           <GlassPanel className="pane-surface h-full min-h-0 overflow-hidden rounded-2xl">
             <Inspector
               selectedNode={selectedNode || ""}
+              selectedTreeNode={selectedTreeNode}
               documents={documents}
-              onDocumentUpdate={(id, data) => {
-                setDocuments((prev) => ({
-                  ...prev,
-                  [id]: {
-                    ...(prev[id] || {}),
-                    ...data,
-                    lastModified: new Date().toISOString(),
-                  },
-                }))
-              }}
+              snapshotSettings={projectSettings.snapshotSettings}
+              metadataFields={projectSettings.metadataFields}
+              metadataTemplates={projectSettings.metadataTemplates}
+              onDocumentUpdate={applyDocumentPatch}
+              onNodeUpdate={handleNodeUpdate}
+              onCreateSnapshot={handleCreateDocumentSnapshot}
+              onRestoreSnapshot={handleRestoreDocumentSnapshot}
             />
           </GlassPanel>
         </div>
@@ -824,8 +1774,8 @@ ${compiledContent}
             <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3">
               <div className="flex min-w-0 items-center gap-2">
                 <div className="flex items-center gap-2 px-1">
-                  <InkAndQuillLogo className="h-5 w-5" />
-                  <h1 className="text-sm font-semibold tracking-wide font-cursive" style={{ fontFamily: "var(--font-dancing-script)" }}>
+                  <InkAndQuillLogo className="h-7 w-7" />
+                  <h1 className="text-base font-semibold tracking-wide font-cursive" style={{ fontFamily: "var(--font-dancing-script)" }}>
                     Ink & Quill
                   </h1>
                 </div>
@@ -851,6 +1801,14 @@ ${compiledContent}
                         <FolderOpen className="mr-2 h-4 w-4" />
                         <span>Open Project</span>
                       </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleSaveProject(false)}>
+                        <Save className="mr-2 h-4 w-4" />
+                        <span>Save Project</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={handleSaveProjectAs}>
+                        <Save className="mr-2 h-4 w-4" />
+                        <span>Save Project As...</span>
+                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
 
@@ -865,7 +1823,7 @@ ${compiledContent}
 
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <GlassIconButton onClick={handleCompile} aria-label="Compile manuscript">
+                      <GlassIconButton onClick={openCompileDialog} aria-label="Compile manuscript">
                         <Printer className="h-4 w-4" />
                       </GlassIconButton>
                     </TooltipTrigger>
@@ -948,9 +1906,45 @@ ${compiledContent}
                     </TooltipTrigger>
                     <TooltipContent>Outliner View</TooltipContent>
                   </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <GlassIconButton
+                        active={viewMode === "flow"}
+                        onClick={() => setViewMode("flow")}
+                        aria-label="Flow mode"
+                      >
+                        <Rows3 className="h-4 w-4" />
+                      </GlassIconButton>
+                    </TooltipTrigger>
+                    <TooltipContent>Flow Mode</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <GlassIconButton
+                        active={viewMode === "targets"}
+                        onClick={() => setViewMode("targets")}
+                        aria-label="Targets dashboard"
+                      >
+                        <Target className="h-4 w-4" />
+                      </GlassIconButton>
+                    </TooltipTrigger>
+                    <TooltipContent>Targets Dashboard</TooltipContent>
+                  </Tooltip>
                 </GlassSegmented>
 
                 <GlassToolbarGroup>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <GlassIconButton
+                        active={quickReferenceOpen}
+                        onClick={() => setQuickReferenceOpen((prev) => !prev)}
+                        aria-label="Toggle quick reference pane"
+                      >
+                        <BookOpen className="h-4 w-4" />
+                      </GlassIconButton>
+                    </TooltipTrigger>
+                    <TooltipContent>Quick Reference</TooltipContent>
+                  </Tooltip>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <GlassIconButton active={focusMode} onClick={() => setFocusMode(!focusMode)} aria-label="Toggle focus mode">
@@ -982,7 +1976,75 @@ ${compiledContent}
         </div>
       )}
 
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <Dialog open={compileDialogOpen} onOpenChange={setCompileDialogOpen}>
+        <DialogContent className="sm:max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle>Compile Project</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-5 py-2">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">Preset</p>
+              <Select
+                value={selectedCompilePresetId}
+                onValueChange={(value) => {
+                  setSelectedCompilePresetId(value)
+                  const matched = projectSettings.compilePresets.find((preset) => preset.id === value)
+                  if (matched?.outputFormat) {
+                    setSelectedCompileFormat(matched.outputFormat)
+                  }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select compile preset" />
+                </SelectTrigger>
+                <SelectContent>
+                  {projectSettings.compilePresets.map((preset) => (
+                    <SelectItem key={preset.id} value={preset.id}>
+                      {preset.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {(() => {
+                const matched = projectSettings.compilePresets.find((preset) => preset.id === selectedCompilePresetId)
+                if (!matched?.description) return null
+                return <p className="text-xs text-muted-foreground">{matched.description}</p>
+              })()}
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">Output Format</p>
+              <Select value={selectedCompileFormat} onValueChange={(value) => setSelectedCompileFormat(value as CompileOutputFormat)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select output format" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(compileFormatLabels) as CompileOutputFormat[]).map((format) => (
+                    <SelectItem key={format} value={format}>
+                      {compileFormatLabels[format]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCompileDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCompile}>Compile</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <SettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        projectSettings={projectSettings}
+        onProjectSettingsChange={handleProjectSettingsUpdate}
+      />
       {/* Hidden file input for opening projects (browser fallback) */}
       <input type="file" ref={fileInputRef} className="hidden" accept=".quill" onChange={handleFileChange} />
     </div>

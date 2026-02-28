@@ -27,11 +27,15 @@ export function Outliner({ treeData, documents, selectedNode, onNodeSelect, onDo
           content: "",
           synopsis: "",
           notes: "",
+          wordTarget: 1500,
+          snapshots: [],
+          comments: [],
           status: "to-do",
           label: "none",
+          metadata: {},
           wordCount: 0,
           createdAt: "",
-          lastModified: ""
+          lastModified: "",
         }
         result.push({ node, doc: docInfo })
       }

@@ -17,6 +17,7 @@ import {
   Type,
   FileQuestionIcon as FileBreak,
   Save,
+  MessageSquarePlus,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -37,12 +38,15 @@ import TextAlign from "@tiptap/extension-text-align"
 import { TextStyle } from "@tiptap/extension-text-style"
 import FontSize from "tiptap-fontsize-extension" // Updated import
 import Placeholder from "@tiptap/extension-placeholder"
-import { WordCount, ListExtensions, TabIndent, PageBreak } from "./tiptap-extensions"
+import { CommentMark, WordCount, ListExtensions, TabIndent, PageBreak } from "./tiptap-extensions"
+import { createCommentId, type EditorCommentDraft } from "@/lib/comment-utils"
 
 interface TiptapEditorProps {
   selectedNode: string
   initialContent?: string
   onContentChange?: (content: string) => void
+  onCommentCreate?: (comment: EditorCommentDraft) => void
+  compactMode?: boolean
 }
 
 // US Letter paper dimensions (in pixels at 96 DPI)
@@ -119,7 +123,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
 ]
 
-export function TiptapEditor({ selectedNode, initialContent, onContentChange }: TiptapEditorProps) {
+export function TiptapEditor({ selectedNode, initialContent, onContentChange, onCommentCreate, compactMode = false }: TiptapEditorProps) {
   const [mounted, setMounted] = useState(false)
   const { resolvedTheme } = useTheme()
   const isDark = resolvedTheme === "dark"
@@ -155,6 +159,7 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
       WordCount,
       TabIndent,
       PageBreak,
+      CommentMark,
       ...ListExtensions,
       // Add placeholder extension
       Placeholder.configure({
@@ -532,10 +537,36 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
     setTimeout(() => setShowSaveNotification(false), 2000)
   }
 
+  const handleAddComment = () => {
+    if (!editor || !selectedNode || !onCommentCreate) return
+    if (editor.state.selection.empty) return
+
+    const selectionText = editor.state.doc.textBetween(
+      editor.state.selection.from,
+      editor.state.selection.to,
+      " ",
+      " ",
+    )
+    const note = window.prompt("Add a comment")
+    if (note === null) return
+
+    const trimmedNote = note.trim()
+    if (!trimmedNote) return
+
+    const commentId = createCommentId()
+    ;(editor.chain().focus() as any).setComment({ commentId }).run()
+    onCommentCreate({
+      id: commentId,
+      text: trimmedNote,
+      quote: selectionText.trim() || undefined,
+    })
+  }
+
   return (
     <>
-      <div className="flex h-full min-h-0 flex-col pane-surface">
-        <div className="flex flex-wrap items-center gap-2 border-b border-white/10 bg-transparent p-2">
+      <div className={`${compactMode ? "flex min-h-[380px] flex-col pane-surface" : "flex h-full min-h-0 flex-col pane-surface"}`}>
+        {!compactMode && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-white/10 bg-transparent p-2">
           <TooltipProvider>
             <div className="flex items-center space-x-1 glass-toolbar-group">
               <Tooltip>
@@ -570,6 +601,22 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
           </TooltipProvider>
           <TooltipProvider>
             <div className="flex items-center space-x-1 glass-toolbar-group">
+              {onCommentCreate && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className={`${getToolbarButtonClass()} h-8 w-8`}
+                      onClick={handleAddComment}
+                      disabled={editor?.state.selection.empty}
+                    >
+                      <MessageSquarePlus className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Add Comment</TooltipContent>
+                </Tooltip>
+              )}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -772,10 +819,31 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
               </Tooltip>
             </div>
           </TooltipProvider>
-        </div>
+          </div>
+        )}
+        {compactMode && onCommentCreate && (
+          <div className="flex items-center justify-end border-b border-white/10 bg-transparent p-2">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={`${getToolbarButtonClass()} h-8 w-8`}
+                    onClick={handleAddComment}
+                    disabled={editor?.state.selection.empty}
+                  >
+                    <MessageSquarePlus className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Add Comment</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+        )}
         <div
           ref={scrollContainerRef}
-          className={`editor-scroll-container relative flex-1 min-h-0 overflow-auto overflow-x-hidden ${getEditorBackgroundClass()}`}
+          className={`editor-scroll-container relative ${compactMode ? "min-h-[320px] overflow-auto" : "flex-1 min-h-0 overflow-auto"} overflow-x-hidden ${getEditorBackgroundClass()}`}
         >
           <div
             className="editor-wrapper mx-auto my-4 paper-animation"
@@ -846,16 +914,18 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange }: 
             </div>
           )}
         </div>
-        <div className="flex items-center justify-between border-t border-white/10 p-2 text-sm text-muted-foreground">
-          <div className="flex items-center space-x-3">
-            <span>{editor?.storage.wordCount.wordCount || 0} words</span>
-            <span className="text-muted-foreground">•</span>
-            <span title="Based on standard manuscript format (275 words per page)">
-              ~{Math.ceil((editor?.storage.wordCount.wordCount || 0) / 275)} pages
-            </span>
+        {!compactMode && (
+          <div className="flex items-center justify-between border-t border-white/10 p-2 text-sm text-muted-foreground">
+            <div className="flex items-center space-x-3">
+              <span>{editor?.storage.wordCount.wordCount || 0} words</span>
+              <span className="text-muted-foreground">•</span>
+              <span title="Based on standard manuscript format (275 words per page)">
+                ~{Math.ceil((editor?.storage.wordCount.wordCount || 0) / 275)} pages
+              </span>
+            </div>
+            {/* Removed keyboard shortcut indicators */}
           </div>
-          {/* Removed keyboard shortcut indicators */}
-        </div>
+        )}
         {showSaveNotification && (
           <div className="fixed bottom-4 right-4 bg-green-500 text-white px-4 py-2 rounded shadow-lg notification">
             Document saved successfully

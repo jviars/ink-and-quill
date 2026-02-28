@@ -12,10 +12,10 @@ import {
 } from "@dnd-kit/core"
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { Folder, FileText, ChevronRight, ChevronDown, Trash, Edit, Search } from "lucide-react"
+import { Folder, FileText, ChevronRight, ChevronDown, Trash, Edit, Search, Image as ImageIcon, Link2, BookOpen } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useState, useEffect } from "react"
-import type { FileNode } from "@/lib/project-types"
+import type { FileNode, TreeNode, ResearchItemType } from "@/lib/project-types"
 import {
   findNode,
   insertNode,
@@ -36,6 +36,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 /* ────────────────────────────────────────────────────────────── *
  * 1. Recursive sortable item
@@ -52,6 +53,9 @@ function TreeItem({
   onDelete,
   onCreateFile,
   onCreateFolder,
+  onCreateResearchItem,
+  onImportResearchFiles,
+  documents,
 }: {
   node: FileNode
   depth: number
@@ -64,6 +68,9 @@ function TreeItem({
   onDelete: (id: string) => void
   onCreateFile: (parentId: string | null) => void
   onCreateFolder: (parentId: string | null) => void
+  onCreateResearchItem: (parentId: string | null, itemType: ResearchItemType) => void
+  onImportResearchFiles: (parentId: string | null) => void
+  documents?: Record<string, any>
 }) {
   const { resolvedTheme } = useTheme()
   const { attributes, listeners, setNodeRef, transform, isDragging, isOver } = useSortable({ id: node.id })
@@ -108,6 +115,16 @@ function TreeItem({
     return ""
   }
 
+  const researchType: ResearchItemType | null = node.type === "file" ? documents?.[node.id]?.research?.type ?? null : null
+
+  const nodeIcon = node.type === "folder"
+    ? <Folder className="h-4 w-4 mr-2 text-gray-500" />
+    : researchType === "image"
+      ? <ImageIcon className="h-4 w-4 mr-2 text-gray-500" />
+      : researchType === "link"
+        ? <Link2 className="h-4 w-4 mr-2 text-gray-500" />
+        : <FileText className="h-4 w-4 mr-2 text-gray-500" />
+
   return (
     <div
       ref={setNodeRef}
@@ -150,13 +167,14 @@ function TreeItem({
               <span className="mr-1 w-4" />
             )}
 
-            {node.type === "folder" ? (
-              <Folder className="h-4 w-4 mr-2 text-gray-500" />
-            ) : (
-              <FileText className="h-4 w-4 mr-2 text-gray-500" />
-            )}
+            {nodeIcon}
 
             <span className="truncate">{node.name}</span>
+            {researchType && (
+              <span className="ml-2 rounded border border-white/10 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+                {researchType}
+              </span>
+            )}
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
@@ -169,6 +187,18 @@ function TreeItem({
               <ContextMenuItem onClick={() => onCreateFile(node.id)}>
                 <FileText className="h-4 w-4 mr-2" />
                 New File
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => onCreateResearchItem(node.id, "note")}>
+                <FileText className="h-4 w-4 mr-2" />
+                New Research Note
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => onCreateResearchItem(node.id, "link")}>
+                <Link2 className="h-4 w-4 mr-2" />
+                New Research Link
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => onImportResearchFiles(node.id)}>
+                <ImageIcon className="h-4 w-4 mr-2" />
+                Import Research File
               </ContextMenuItem>
               <ContextMenuSeparator />
               <ContextMenuItem onClick={() => onRename(node.id, node.name)}>
@@ -211,6 +241,9 @@ function TreeItem({
               onDelete={onDelete}
               onCreateFile={onCreateFile}
               onCreateFolder={onCreateFolder}
+              onCreateResearchItem={onCreateResearchItem}
+              onImportResearchFiles={onImportResearchFiles}
+              documents={documents}
             />
           ))}
         </SortableContext>
@@ -241,6 +274,9 @@ function matchesSearch(node: FileNode, query: string, documents?: Record<string,
     if (doc.synopsis?.toLowerCase().includes(query.toLowerCase())) return true
     if (doc.notes?.toLowerCase().includes(query.toLowerCase())) return true
     if (doc.keywords?.toLowerCase().includes(query.toLowerCase())) return true
+    if (doc.research?.sourceName?.toLowerCase().includes(query.toLowerCase())) return true
+    if (doc.research?.sourceUrl?.toLowerCase().includes(query.toLowerCase())) return true
+    if (doc.research?.indexedText?.toLowerCase().includes(query.toLowerCase())) return true
   }
   return false
 }
@@ -270,12 +306,16 @@ export default function FileSidebar({
   selectedNode,
   onNodeSelect,
   documents,
+  onCreateResearchItem,
+  onImportResearchFiles,
 }: {
-  initialTree: any[]
-  onTreeChange: (t: any[]) => void
+  initialTree: TreeNode[]
+  onTreeChange: (t: TreeNode[]) => void
   selectedNode: string | null
   onNodeSelect: (nodeId: string) => void
   documents?: Record<string, any>
+  onCreateResearchItem?: (parentId: string | null, itemType: ResearchItemType) => void
+  onImportResearchFiles?: (parentId: string | null) => void
 }) {
   // Convert from our existing tree structure to FileNode structure
   const [tree, setTree] = useState<FileNode[]>(convertToFileNodes(initialTree))
@@ -474,6 +514,9 @@ export default function FileSidebar({
       id: newFolderId,
       name: "New Folder",
       type: "folder",
+      sectionType: "chapter",
+      includeInCompile: true,
+      metadataTemplateId: null,
       parentId,
       children: [],
     }
@@ -507,6 +550,9 @@ export default function FileSidebar({
       id: newFileId,
       name: "New File",
       type: "file",
+      sectionType: "scene",
+      includeInCompile: true,
+      metadataTemplateId: null,
       parentId,
     }
 
@@ -534,6 +580,19 @@ export default function FileSidebar({
 
   const filteredTree = filterTree(tree || [], searchQuery, documents)
 
+  const handleCreateResearchItem = (parentId: string | null, itemType: ResearchItemType) => {
+    if (onCreateResearchItem) {
+      onCreateResearchItem(parentId, itemType)
+      return
+    }
+    handleCreateFile(parentId)
+  }
+
+  const handleImportResearchFiles = (parentId: string | null) => {
+    if (!onImportResearchFiles) return
+    onImportResearchFiles(parentId)
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex items-center justify-between border-b border-white/10 px-4 py-3">
@@ -557,6 +616,32 @@ export default function FileSidebar({
           >
             <FileText className="h-4 w-4 text-muted-foreground" />
           </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="glass-icon-button h-7 w-7"
+                title="Research options"
+              >
+                <BookOpen className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleCreateResearchItem(null, "note")}>
+                <FileText className="h-4 w-4 mr-2" />
+                New Research Note
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleCreateResearchItem(null, "link")}>
+                <Link2 className="h-4 w-4 mr-2" />
+                New Research Link
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleImportResearchFiles(null)}>
+                <ImageIcon className="h-4 w-4 mr-2" />
+                Import Research File
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 
@@ -596,6 +681,9 @@ export default function FileSidebar({
                     onDelete={handleDelete}
                     onCreateFile={handleCreateFile}
                     onCreateFolder={handleCreateFolder}
+                    onCreateResearchItem={handleCreateResearchItem}
+                    onImportResearchFiles={handleImportResearchFiles}
+                    documents={documents}
                   />
                 ))}
               </SortableContext>
@@ -625,6 +713,18 @@ export default function FileSidebar({
             <ContextMenuItem onClick={() => handleCreateFile(null)}>
               <FileText className="h-4 w-4 mr-2" />
               New File
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => handleCreateResearchItem(null, "note")}>
+              <FileText className="h-4 w-4 mr-2" />
+              New Research Note
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => handleCreateResearchItem(null, "link")}>
+              <Link2 className="h-4 w-4 mr-2" />
+              New Research Link
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => handleImportResearchFiles(null)}>
+              <ImageIcon className="h-4 w-4 mr-2" />
+              Import Research File
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>

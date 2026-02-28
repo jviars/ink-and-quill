@@ -1,4 +1,4 @@
-import type { FileNode } from "./project-types"
+import type { FileNode, TreeNode } from "./project-types"
 
 /** Depth-first search to find a node and its parent */
 export function findNode(
@@ -37,8 +37,6 @@ export function insertNode(nodes: FileNode[], targetFolderId: string | null, nod
       return {
         ...n,
         children: [...children, node],
-        // Make sure the folder is marked as expanded when something is dropped into it
-        expanded: true,
       }
     }
     if (n.type === "folder" && n.children?.length) {
@@ -49,12 +47,15 @@ export function insertNode(nodes: FileNode[], targetFolderId: string | null, nod
 }
 
 // Convert from our existing TreeNodeProps structure to FileNode structure
-export function convertToFileNodes(treeData: any[]): FileNode[] {
+export function convertToFileNodes(treeData: TreeNode[]): FileNode[] {
   return treeData.map((node) => {
     const fileNode: FileNode = {
       id: node.id,
       name: node.label,
       type: node.type === "folder" ? "folder" : "file",
+      sectionType: node.sectionType,
+      includeInCompile: node.includeInCompile,
+      metadataTemplateId: node.metadataTemplateId ?? null,
       parentId: null,
     }
 
@@ -72,12 +73,15 @@ export function convertToFileNodes(treeData: any[]): FileNode[] {
 }
 
 // Convert from FileNode structure back to our existing TreeNodeProps structure
-export function convertFromFileNodes(fileNodes: FileNode[]): any[] {
+export function convertFromFileNodes(fileNodes: FileNode[]): TreeNode[] {
   return fileNodes.map((node) => {
-    const treeNode: any = {
+    const treeNode: TreeNode = {
       id: node.id,
       label: node.name,
       type: node.type === "folder" ? "folder" : "document",
+      sectionType: node.sectionType,
+      includeInCompile: typeof node.includeInCompile === "boolean" ? node.includeInCompile : true,
+      metadataTemplateId: node.metadataTemplateId ?? null,
     }
 
     if (node.type === "folder" && node.children && node.children.length > 0) {
