@@ -1,0 +1,1320 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
+
+    --radius: 0.5rem;
+
+    --font-cursive: var(--font-dancing-script), "Dancing Script", cursive;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+  }
+}
+
+/* Muted Elegance Theme */
+.muted-elegance {
+  /* Base colors */
+  --background: 0 0% 34%; /* #565656 */
+  --foreground: 0 0% 95%; /* Light text for readability */
+
+  /* Card colors */
+  --card: 0 0% 34%; /* #565656 */
+  --card-foreground: 0 0% 95%;
+
+  /* Popover colors */
+  --popover: 0 0% 34%; /* #565656 */
+  --popover-foreground: 0 0% 95%;
+
+  /* Primary colors - terracotta accent */
+  --primary: 17 50% 77%; /* #E3B5A4 */
+  --primary-foreground: 0 0% 20%;
+
+  /* Secondary colors - slightly lighter gray */
+  --secondary: 0 0% 40%; /* #666666 */
+  --secondary-foreground: 0 0% 95%;
+
+  /* Muted colors - slightly darker gray */
+  --muted: 0 0% 30%; /* #4D4D4D */
+  --muted-foreground: 0 0% 80%;
+
+  /* Accent colors - terracotta */
+  --accent: 17 50% 77%; /* #E3B5A4 */
+  --accent-foreground: 0 0% 20%;
+
+  /* Destructive colors */
+  --destructive: 0 70% 50%;
+  --destructive-foreground: 0 0% 95%;
+
+  /* Border and input colors */
+  --border: 0 0% 40%;
+  --input: 0 0% 40%;
+  --ring: 17 50% 77%; /* #E3B5A4 */
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Custom styles for Scriptura */
+.theme-transition {
+  @apply transition-colors duration-200;
+}
+
+/* Muted Elegance specific overrides */
+.muted-elegance .bg-white {
+  background-color: #565656;
+}
+
+.muted-elegance .bg-gray-50 {
+  background-color: #4d4d4d;
+}
+
+.muted-elegance .bg-gray-100 {
+  background-color: #666666;
+}
+
+.muted-elegance .text-gray-500 {
+  color: #e3b5a4;
+}
+
+.muted-elegance .text-gray-600 {
+  color: #f0f0f0;
+}
+
+.muted-elegance textarea {
+  background-color: #565656;
+  color: #f0f0f0;
+}
+
+.muted-elegance .border-b,
+.muted-elegance .border-t,
+.muted-elegance .border-l,
+.muted-elegance .border-r,
+.muted-elegance .border {
+  border-color: #666666;
+}
+
+/* Corkboard customization for Muted Elegance theme */
+.muted-elegance .bg-amber-50 {
+  background-color: #4d4d4d;
+}
+
+.muted-elegance .border-amber-200 {
+  border-color: #666666;
+}
+
+/* Button styles for Muted Elegance */
+.muted-elegance .bg-secondary {
+  background-color: #666666;
+}
+
+.muted-elegance .hover\:bg-secondary\/80:hover {
+  background-color: #777777;
+}
+
+.muted-elegance .bg-primary {
+  background-color: #e3b5a4;
+}
+
+.muted-elegance .hover\:bg-primary\/90:hover {
+  background-color: #d8a696;
+}
+
+/* Resize handle styles */
+.resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: ew-resize;
+  z-index: 10;
+  transition: background-color 0.2s ease;
+}
+
+.resize-handle:hover {
+  background-color: rgba(128, 128, 128, 0.2);
+}
+
+.resize-handle.active {
+  background-color: rgba(128, 128, 128, 0.4);
+}
+
+.resize-handle:hover::after,
+.resize-handle.active::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  height: 40px;
+  width: 3px;
+  border-radius: 3px;
+  transition: opacity 0.2s ease;
+}
+
+.light .resize-handle:hover::after,
+.light .resize-handle.active::after {
+  background-color: rgba(0, 0, 0, 0.2);
+}
+
+.dark .resize-handle:hover::after,
+.dark .resize-handle.active::after {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.muted-elegance .resize-handle:hover::after,
+.muted-elegance .resize-handle.active::after {
+  background-color: #e3b5a4;
+}
+
+/* Add these styles to improve the editor textarea appearance */
+.editor-content {
+  font-family: "Georgia", serif;
+  line-height: 1.6;
+  transition: font-size 0.2s ease;
+  min-height: 500px;
+  outline: none;
+}
+
+/* Add animation for notifications */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-in {
+  animation: fadeIn 0.3s ease forwards;
+}
+
+.fade-in {
+  opacity: 0;
+  animation-fill-mode: forwards;
+}
+
+/* Improve button hover states */
+.button-hover-effect:hover {
+  transform: translateY(-1px);
+  transition: transform 0.2s ease;
+}
+
+/* Add styles for the editor toolbar active states */
+.toolbar-button-active {
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+.dark .toolbar-button-active {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.muted-elegance .toolbar-button-active {
+  background-color: rgba(227, 181, 164, 0.3);
+}
+
+/* Rich text editor styles */
+.editor-content h1 {
+  font-size: 1.8em;
+  font-weight: bold;
+  margin-bottom: 0.5em;
+}
+
+.editor-content h2 {
+  font-size: 1.5em;
+  font-weight: bold;
+  margin-bottom: 0.5em;
+}
+
+.editor-content h3 {
+  font-size: 1.3em;
+  font-weight: bold;
+  margin-bottom: 0.5em;
+}
+
+.editor-content p {
+  margin-bottom: 1em;
+}
+
+.editor-content ul,
+.editor-content ol {
+  margin-left: 1.5em;
+  margin-bottom: 1em;
+}
+
+.editor-content ul li {
+  list-style-type: disc;
+}
+
+.editor-content ol li {
+  list-style-type: decimal;
+}
+
+.editor-content [style*="text-align: center"] {
+  text-align: center;
+}
+
+.editor-content [style*="text-align: right"] {
+  text-align: right;
+}
+
+.editor-content [style*="text-align: left"] {
+  text-align: left;
+}
+
+/* Add Tiptap specific styles to globals.css */
+
+/* Tiptap editor styles */
+.ProseMirror {
+  padding: 0;
+  outline: none;
+  font-family: "Georgia", serif;
+  line-height: 1.6;
+  min-height: 500px;
+  font-size: 16px; /* Ensure default font size is 16px */
+}
+
+.ProseMirror p {
+  margin-bottom: 1em;
+}
+
+.ProseMirror h1 {
+  font-size: 1.8em;
+  font-weight: bold;
+  margin-bottom: 0.5em;
+}
+
+.ProseMirror h2 {
+  font-size: 1.5em;
+  font-weight: bold;
+  margin-bottom: 0.5em;
+}
+
+.ProseMirror h3 {
+  font-size: 1.3em;
+  font-weight: bold;
+  margin-bottom: 0.5em;
+}
+
+.ProseMirror ul {
+  list-style-type: disc;
+  padding-left: 1.5em;
+  margin-bottom: 1em;
+}
+
+.ProseMirror ol {
+  list-style-type: decimal;
+  padding-left: 1.5em;
+  margin-bottom: 1em;
+}
+
+/* Alignment styles */
+.ProseMirror .is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #aaa;
+  pointer-events: none;
+  height: 0;
+  font-style: italic;
+  opacity: 0.6;
+}
+
+.ProseMirror .text-left {
+  text-align: left;
+}
+
+.ProseMirror .text-center {
+  text-align: center;
+}
+
+.ProseMirror .text-right {
+  text-align: right;
+}
+
+/* Muted Elegance theme specific overrides for Tiptap */
+.muted-elegance .ProseMirror {
+  color: #2d2a24;
+}
+
+.dark .ProseMirror {
+  color: #e0e0e0;
+}
+
+/* Tiptap editor styles for paper display */
+.ProseMirror {
+  padding: 0;
+  outline: none;
+  font-family: "Georgia", serif;
+  line-height: 1.6;
+  min-height: 500px;
+  font-size: 16px; /* Default font size */
+}
+
+.ProseMirror p {
+  margin-bottom: 1em;
+}
+
+.ProseMirror h1 {
+  font-size: 1.8em;
+  font-weight: bold;
+  margin-bottom: 0.5em;
+}
+
+.ProseMirror h2 {
+  font-size: 1.5em;
+  font-weight: bold;
+  margin-bottom: 0.5em;
+}
+
+.ProseMirror h3 {
+  font-size: 1.3em;
+  font-weight: bold;
+  margin-bottom: 0.5em;
+}
+
+.ProseMirror ul {
+  list-style-type: disc;
+  padding-left: 1.5em;
+  margin-bottom: 1em;
+}
+
+.ProseMirror ol {
+  list-style-type: decimal;
+  padding-left: 1.5em;
+  margin-bottom: 1em;
+}
+
+/* Paper-specific styles */
+.paper {
+  background-color: white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.dark .paper {
+  background-color: #2a2a2a;
+  color: #e0e0e0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.muted-elegance .paper {
+  background-color: #e8dcc9;
+  color: #2d2a24;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* Fix for Tiptap editor in dark mode */
+.dark .ProseMirror {
+  color: #e0e0e0;
+}
+
+.muted-elegance .ProseMirror {
+  color: #2d2a24;
+}
+
+/* Tab indentation styles */
+.ProseMirror p.indented {
+  text-indent: 2em;
+}
+
+/* Add these styles for the pagination and page breaks */
+/* Replace the existing pagination CSS with this vertical pagination approach */
+
+/* Editor wrapper for pagination */
+.editor-wrapper {
+  /* Change from fixed width to max-width for responsiveness */
+  max-width: 8.5in;
+  width: 100%; /* Take full width of container up to max-width */
+  margin: 0 auto;
+  overflow-x: hidden; /* Hide horizontal overflow */
+  overflow-y: auto; /* Keep vertical scrolling */
+  border: 1px solid #ddd; /* optional page border */
+
+  /* Theme-specific styling will be applied inline */
+}
+
+/* Update the editor styles to be fully responsive */
+.editor {
+  width: 100%; /* fill the wrapper width */
+  min-height: 11in; /* minimum height of one page */
+  padding: 0.75in; /* page margin */
+  position: relative;
+  box-sizing: border-box; /* Include padding in width calculation */
+}
+
+/* Add responsive padding for smaller screens */
+@media (max-width: 8.5in) {
+  .editor {
+    padding: 0.5in; /* Smaller padding on small screens */
+  }
+}
+
+/* Make sure content doesn't overflow */
+.ProseMirror {
+  max-width: 100%;
+  overflow-wrap: break-word; /* Ensure text wraps instead of overflowing */
+  word-break: break-word; /* Additional word breaking for long content */
+}
+
+/* Style & force breaks at your <hr class="page-break"> */
+.page-break {
+  display: block;
+  height: 0;
+  margin: 0;
+  page-break-after: always;
+  page-break-before: always;
+  border: none;
+
+  /* Visual indicator of page break in editor */
+  position: relative;
+}
+
+.page-break::after {
+  content: "";
+  display: block;
+  height: 1px;
+  border-top: 1px dashed #888;
+  margin-top: -0.5px;
+  width: 100%;
+}
+
+/* Create visual separation between pages */
+.page-break + * {
+  margin-top: 0.5in;
+  padding-top: 0.75in;
+  border-top: 1px solid #ddd;
+  position: relative;
+}
+
+/* Dark mode and Muted Elegance theme adjustments */
+.dark .editor-wrapper {
+  border-color: #444;
+}
+
+.muted-elegance .editor-wrapper {
+  border-color: #666666;
+}
+
+.dark .page-break::after {
+  border-top-color: #555;
+}
+
+.muted-elegance .page-break::after {
+  border-top-color: #777;
+}
+
+.dark .page-break + * {
+  border-top-color: #444;
+}
+
+.muted-elegance .page-break + * {
+  border-top-color: #666666;
+}
+
+/* First page number */
+.editor::before {
+  content: "Pageless";
+  position: absolute;
+  bottom: 0.25in;
+  right: 0;
+  left: 0;
+  text-align: center;
+  font-size: 1.5rem;
+  color: #888;
+  font-family: var(--font-cursive);
+  font-weight: 400;
+  letter-spacing: 0.05em;
+  transition: color 0.3s ease, transform 0.3s ease;
+}
+
+.dark .editor::before {
+  color: #aaa;
+}
+
+.muted-elegance .editor::before {
+  color: #e3b5a4;
+}
+
+/* Add page numbers */
+.page-break + *::before {
+  content: "Pageless";
+  position: absolute;
+  bottom: 0.25in;
+  right: 0;
+  left: 0;
+  text-align: center;
+  font-size: 1.5rem;
+  color: #888;
+  font-family: var(--font-cursive);
+  font-weight: 400;
+  letter-spacing: 0.05em;
+  transition: color 0.3s ease, transform 0.3s ease;
+}
+
+.dark .page-break + *::before {
+  color: #aaa;
+}
+
+.muted-elegance .page-break + *::before {
+  color: #e3b5a4;
+}
+
+/* Add a subtle hover effect */
+.editor:hover::before,
+.page-break + *:hover::before {
+  transform: scale(1.05);
+}
+
+/* Add these animation styles at the end of the file */
+
+/* General animation utilities */
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+.animate-slide-down {
+  animation: slideDown 0.2s ease-in-out;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.2s ease-in-out;
+}
+
+.transition-all {
+  transition: all 0.2s ease-in-out;
+}
+
+.transition-transform {
+  transition: transform 0.2s ease-in-out;
+}
+
+.transition-opacity {
+  transition: opacity 0.2s ease-in-out;
+}
+
+.transition-colors {
+  transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out, border-color 0.2s ease-in-out;
+}
+
+/* Button hover animations */
+button:not(:disabled):hover {
+  transform: translateY(-1px);
+  transition: transform 0.2s ease-in-out;
+}
+
+button:not(:disabled):active {
+  transform: translateY(0);
+  transition: transform 0.1s ease-in-out;
+}
+
+/* Tree view animations */
+.tree-node-content {
+  transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out;
+}
+
+.tree-children {
+  overflow: hidden;
+  transition: height 0.3s ease-in-out, opacity 0.3s ease-in-out;
+}
+
+.tree-children.collapsed {
+  height: 0;
+  opacity: 0;
+}
+
+.tree-children.expanded {
+  height: auto;
+  opacity: 1;
+}
+
+.chevron-icon {
+  transition: transform 0.3s ease-in-out;
+}
+
+.chevron-icon.rotated {
+  transform: rotate(90deg);
+}
+
+/* Editor animations */
+.ProseMirror p {
+  transition: text-indent 0.2s ease-in-out, margin 0.2s ease-in-out;
+}
+
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3 {
+  transition: font-size 0.2s ease-in-out, margin 0.2s ease-in-out;
+}
+
+.ProseMirror ul,
+.ProseMirror ol {
+  transition: padding-left 0.2s ease-in-out, margin 0.2s ease-in-out;
+}
+
+.ProseMirror * {
+  transition: font-weight 0.2s ease-in-out, font-style 0.2s ease-in-out, text-decoration 0.2s ease-in-out;
+}
+
+/* Tab switching animations */
+.tab-content {
+  transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out;
+}
+
+.tab-content.entering {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.tab-content.entered {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Card animations for corkboard */
+.card-hover {
+  transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+.card-hover:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+/* Animation keyframes */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Cursor animation */
+.ProseMirror .cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.2em;
+  background-color: currentColor;
+  margin-left: -1px;
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  from,
+  to {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+/* View mode transition animations */
+.view-transition {
+  transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
+}
+
+.view-transition.exiting {
+  opacity: 0;
+  transform: scale(0.95);
+}
+
+.view-transition.entering {
+  opacity: 0;
+  transform: scale(1.05);
+}
+
+.view-transition.entered {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* Resizable sidebar animation */
+.resize-handle-line {
+  transition: opacity 0.2s ease-in-out, height 0.2s ease-in-out;
+}
+
+/* Inspector panel animations */
+.inspector-panel {
+  transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out;
+}
+
+.inspector-panel.entering {
+  opacity: 0;
+  transform: translateX(10px);
+}
+
+.inspector-panel.entered {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* Notification animation refinement */
+.notification {
+  animation: slideInUp 0.3s ease-out forwards, fadeOut 0.3s ease-in forwards 1.7s;
+}
+
+@keyframes slideInUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* Tooltip animation refinement */
+.tooltip-animation {
+  animation: tooltipFadeIn 0.2s ease-out;
+}
+
+@keyframes tooltipFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Settings dialog animation */
+.dialog-animation {
+  animation: dialogFadeIn 0.3s ease-out;
+}
+
+@keyframes dialogFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Paper animation for document view */
+.paper-animation {
+  transition: transform 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
+}
+
+.paper-animation:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+/* Add these scrollbar styles at the end of the file */
+
+/* Custom scrollbar styles for different themes */
+/* Webkit browsers (Chrome, Safari, Edge) */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  transition: background-color 0.2s ease;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Light theme scrollbar */
+.light ::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.2);
+}
+
+.light ::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.3);
+}
+
+/* Dark theme scrollbar */
+.dark ::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+/* Muted Elegance theme scrollbar */
+.muted-elegance ::-webkit-scrollbar-thumb {
+  background-color: rgba(227, 181, 164, 0.5); /* Terracotta accent color with transparency */
+}
+
+.muted-elegance ::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(227, 181, 164, 0.7);
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+}
+
+.light {
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+}
+
+.dark {
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+.muted-elegance {
+  scrollbar-color: rgba(227, 181, 164, 0.5) transparent;
+}
+
+/* Editor-specific scrollbar styles */
+.editor-wrapper {
+  scrollbar-width: thin;
+}
+
+.light .editor-wrapper::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.15);
+  border: 2px solid white;
+  background-clip: padding-box;
+}
+
+.dark .editor-wrapper::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.15);
+  border: 2px solid #2a2a2a;
+  background-clip: padding-box;
+}
+
+.muted-elegance .editor-wrapper::-webkit-scrollbar-thumb {
+  background-color: rgba(227, 181, 164, 0.4);
+  border: 2px solid #e8dcc9;
+  background-clip: padding-box;
+}
+
+/* Subtle scrollbar animation */
+::-webkit-scrollbar-thumb {
+  transition: background-color 0.3s ease;
+}
+
+/* Add these specific styles for the editor scroll container */
+
+.editor-scroll-container {
+  /* Ensure smooth scrolling */
+  scroll-behavior: smooth;
+}
+
+/* Theme-specific styles for the editor scroll container */
+.light .editor-scroll-container::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.2);
+}
+
+.dark .editor-scroll-container::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.muted-elegance .editor-scroll-container::-webkit-scrollbar-thumb {
+  background-color: rgba(227, 181, 164, 0.6);
+}
+
+/* Hover states for the editor scroll container */
+.light .editor-scroll-container::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.3);
+}
+
+.dark .editor-scroll-container::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+.muted-elegance .editor-scroll-container::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(227, 181, 164, 0.8);
+}
+
+/* Add these styles for the tree view scroll container */
+
+.tree-scroll-container {
+  scrollbar-width: thin;
+}
+
+/* Ensure consistent scrollbar styling across all scrollable containers */
+.ScrollArea-viewport {
+  scrollbar-width: thin;
+}
+
+.ScrollArea-viewport::-webkit-scrollbar {
+  width: 8px;
+}
+
+.light .ScrollArea-viewport::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.2);
+}
+
+.dark .ScrollArea-viewport::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.muted-elegance .ScrollArea-viewport::-webkit-scrollbar-thumb {
+  background-color: rgba(227, 181, 164, 0.5);
+}
+
+/* Add these drag-and-drop related styles to the end of the file */
+
+/* Drag and drop styles */
+.dragging {
+  opacity: 0.5;
+  cursor: grabbing !important;
+}
+
+.drag-over {
+  position: relative;
+  outline: 2px dashed var(--primary);
+  outline-offset: -2px;
+  background-color: rgba(var(--primary), 0.1);
+}
+
+.light .drag-over {
+  outline-color: rgba(59, 130, 246, 0.5);
+  background-color: rgba(59, 130, 246, 0.1);
+}
+
+.dark .drag-over {
+  outline-color: rgba(96, 165, 250, 0.5);
+  background-color: rgba(96, 165, 250, 0.1);
+}
+
+.muted-elegance .drag-over {
+  outline-color: rgba(227, 181, 164, 0.5);
+  background-color: rgba(227, 181, 164, 0.1);
+}
+
+/* Drag indicator line */
+.drag-indicator {
+  position: absolute;
+  height: 2px;
+  background-color: var(--primary);
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.light .drag-indicator {
+  background-color: rgb(59, 130, 246);
+}
+
+.dark .drag-indicator {
+  background-color: rgb(96, 165, 250);
+}
+
+.muted-elegance .drag-indicator {
+  background-color: rgb(227, 181, 164);
+}
+
+/* Cursor styles */
+.tree-node-content {
+  cursor: pointer;
+}
+
+.tree-node-content:active {
+  cursor: grabbing;
+}
+
+/* Animation for drag and drop */
+@keyframes dragPulse {
+  0% {
+    outline-offset: -2px;
+  }
+  50% {
+    outline-offset: -4px;
+  }
+  100% {
+    outline-offset: -2px;
+  }
+}
+
+.drag-over {
+  animation: dragPulse 1s ease-in-out infinite;
+}
+
+/* Enhanced drop indicator line */
+.drop-indicator-line {
+  position: absolute;
+  height: 2px;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  pointer-events: none;
+  animation: dropIndicatorPulse 1.5s infinite;
+}
+
+@keyframes dropIndicatorPulse {
+  0% {
+    opacity: 0.6;
+    height: 2px;
+  }
+  50% {
+    opacity: 1;
+    height: 3px;
+  }
+  100% {
+    opacity: 0.6;
+    height: 2px;
+  }
+}
+
+.light .drop-indicator-line {
+  background-color: #3b82f6;
+  box-shadow: 0 0 3px rgba(59, 130, 246, 0.5);
+}
+
+.dark .drop-indicator-line {
+  background-color: #3b82f6;
+  box-shadow: 0 0 3px rgba(59, 130, 246, 0.5);
+}
+
+.muted-elegance .drop-indicator-line {
+  background-color: #e3b5a4;
+  box-shadow: 0 0 3px rgba(227, 181, 164, 0.5);
+}
+
+/* Enhanced folder highlight when dragging over */
+.folder-drag-over {
+  background-color: rgba(59, 130, 246, 0.15);
+  border: 2px dashed rgba(59, 130, 246, 0.6);
+  border-radius: 0.25rem;
+  transition: all 0.2s ease-in-out;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+}
+
+.dark .folder-drag-over {
+  background-color: rgba(96, 165, 250, 0.15);
+  border: 2px dashed rgba(96, 165, 250, 0.6);
+  box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.1);
+}
+
+.muted-elegance .folder-drag-over {
+  background-color: rgba(227, 181, 164, 0.15);
+  border: 2px dashed rgba(227, 181, 164, 0.6);
+  box-shadow: 0 0 0 4px rgba(227, 181, 164, 0.1);
+}
+
+/* Add a pulsing animation to make the folder highlight more noticeable */
+@keyframes folderPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(59, 130, 246, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+  }
+}
+\
+.dark @keyframes folderPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.4);
+  }
+70% {
+box-shadow: 0 0 0 6px rgba(96, 165, 250, 0
+)
+;
+  }
+  100% {
+box-shadow: 0 0 0 0 rgba(96, 165, 250, 0
+)
+;
+  }
+}
+
+.muted-elegance @keyframes folderPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(227, 181, 164, 0.4);
+  }
+70% {
+box-shadow: 0 0 0 6px rgba(227, 181, 164, 0
+)
+;
+  }
+  100% {
+box-shadow: 0 0 0 0 rgba(227, 181, 164, 0
+)
+;
+  }
+}
+
+/* Apply the animation to folders being dragged over */
+.tree-node-content[data-is-folder="true"][data-drag-over="true"] {
+  animation: folderPulse 1.5s infinite;
+}
+
+/* Folder highlight when dragging over */
+.folder-drag-over {
+  background-color: rgba(59, 130, 246, 0.1);
+  border: 2px dashed rgba(59, 130, 246, 0.5);
+  border-radius: 0.25rem;
+  transition: all 0.2s ease-in-out;
+}
+
+.dark .folder-drag-over {
+  background-color: rgba(96, 165, 250, 0.1);
+  border: 2px dashed rgba(96, 165, 250, 0.5);
+}
+
+.muted-elegance .folder-drag-over {
+  background-color: rgba(227, 181, 164, 0.1);
+  border: 2px dashed rgba(227, 181, 164, 0.5);
+}
+
+/* Drag ghost element (the element being dragged) */
+.tree-node-content.dragging {
+  opacity: 0.6;
+  transform: scale(0.95);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+/* Add custom styles for the TipTap placeholder */
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #aaa;
+  pointer-events: none;
+  height: 0;
+  font-style: italic;
+  opacity: 0.6;
+}
+
+/* Remove the after pseudo-element that was adding the quill emoji */
+/* .ProseMirror p.is-editor-empty:first-child::after {
+  content: " ✒️";
+  font-family: var(--font-cursive);
+  font-size: 0.8em;
+  opacity: 0.6;
+  font-style: normal;
+} */
+
+/* Theme-specific placeholder styles */
+.dark .ProseMirror p.is-editor-empty:first-child::before {
+  color: #888;
+}
+
+.muted-elegance .ProseMirror p.is-editor-empty:first-child::before {
+  color: rgba(227, 181, 164, 0.8);
+}
