@@ -312,13 +312,13 @@ export function SettingsDialog({ open, onOpenChange, projectSettings, onProjectS
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[880px] max-h-[90vh] overflow-hidden">
+      <DialogContent className="flex h-[88vh] max-h-[760px] flex-col overflow-hidden sm:min-h-[560px] sm:max-w-[880px]">
         <DialogHeader>
           <DialogTitle>Ink & Quill Settings</DialogTitle>
         </DialogHeader>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-2">
-          <TabsList className="grid w-full grid-cols-5">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-2 flex min-h-0 flex-1 flex-col">
+          <TabsList className="grid w-full shrink-0 grid-cols-5">
             <TabsTrigger value="personalization">Personalization</TabsTrigger>
             <TabsTrigger value="storage">Storage</TabsTrigger>
             <TabsTrigger value="project">Project</TabsTrigger>
@@ -326,7 +326,7 @@ export function SettingsDialog({ open, onOpenChange, projectSettings, onProjectS
             <TabsTrigger value="info">Info</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="personalization" className="mt-6 space-y-6 overflow-y-auto max-h-[62vh] pr-1">
+          <TabsContent value="personalization" className="mt-6 min-h-0 flex-1 space-y-6 overflow-y-auto pr-1">
             <div className="space-y-4">
               <h3 className="text-lg font-medium">Theme</h3>
               <RadioGroup
@@ -370,7 +370,7 @@ export function SettingsDialog({ open, onOpenChange, projectSettings, onProjectS
             </div>
           </TabsContent>
 
-          <TabsContent value="storage" className="mt-6 space-y-6 overflow-y-auto max-h-[62vh] pr-1">
+          <TabsContent value="storage" className="mt-6 min-h-0 flex-1 space-y-6 overflow-y-auto pr-1">
             <div className="space-y-4">
               <h3 className="text-lg font-medium">Project Directory</h3>
               <p className="text-sm text-muted-foreground">Set your default directory for storing project files.</p>
@@ -388,7 +388,7 @@ export function SettingsDialog({ open, onOpenChange, projectSettings, onProjectS
             </div>
           </TabsContent>
 
-          <TabsContent value="project" className="mt-6 space-y-8 overflow-y-auto max-h-[62vh] pr-1">
+          <TabsContent value="project" className="mt-6 min-h-0 flex-1 space-y-8 overflow-y-auto pr-1">
             <div className="space-y-4">
               <h3 className="text-lg font-medium">Snapshots</h3>
               <p className="text-sm text-muted-foreground">
@@ -640,7 +640,7 @@ export function SettingsDialog({ open, onOpenChange, projectSettings, onProjectS
             </div>
           </TabsContent>
 
-          <TabsContent value="compile" className="mt-6 space-y-6 overflow-y-auto max-h-[62vh] pr-1">
+          <TabsContent value="compile" className="mt-6 min-h-0 flex-1 space-y-6 overflow-y-auto pr-1">
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-medium">Compile Presets</h3>
@@ -792,7 +792,7 @@ export function SettingsDialog({ open, onOpenChange, projectSettings, onProjectS
             </div>
           </TabsContent>
 
-          <TabsContent value="info" className="mt-6 space-y-6 overflow-y-auto max-h-[62vh] pr-1">
+          <TabsContent value="info" className="mt-6 min-h-0 flex-1 space-y-6 overflow-y-auto pr-1">
             <div className="space-y-4">
               <div className="flex items-center space-x-2">
                 <InfoIcon className="h-5 w-5 text-primary" />

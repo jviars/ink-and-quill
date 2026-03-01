@@ -3,7 +3,10 @@
 import {
   DndContext,
   closestCenter,
+  pointerWithin,
+  type CollisionDetection,
   type DragEndEvent,
+  type DragOverEvent,
   MouseSensor,
   TouchSensor,
   useSensor,
@@ -14,7 +17,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-
 import { CSS } from "@dnd-kit/utilities"
 import { Folder, FileText, ChevronRight, ChevronDown, Trash, Edit, Search, Image as ImageIcon, Link2, BookOpen } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import type { FileNode, TreeNode, ResearchItemType } from "@/lib/project-types"
 import {
   findNode,
@@ -22,7 +25,6 @@ import {
   removeNode,
   convertToFileNodes,
   convertFromFileNodes,
-  sortTreeNodes,
 } from "@/lib/tree-utils"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
@@ -56,6 +58,7 @@ function TreeItem({
   onCreateResearchItem,
   onImportResearchFiles,
   documents,
+  dragDisabled,
 }: {
   node: FileNode
   depth: number
@@ -71,9 +74,13 @@ function TreeItem({
   onCreateResearchItem: (parentId: string | null, itemType: ResearchItemType) => void
   onImportResearchFiles: (parentId: string | null) => void
   documents?: Record<string, any>
+  dragDisabled: boolean
 }) {
   const { resolvedTheme } = useTheme()
-  const { attributes, listeners, setNodeRef, transform, isDragging, isOver } = useSortable({ id: node.id })
+  const { attributes, listeners, setNodeRef, transform, isDragging, isOver } = useSortable({
+    id: node.id,
+    disabled: dragDisabled,
+  })
   const isDark = resolvedTheme === "dark"
 
   const getSelectedClass = () => {
@@ -227,7 +234,7 @@ function TreeItem({
 
       {node.type === "folder" && node.children?.length && isExpanded ? (
         <SortableContext id={node.id} items={node.children.map((c) => c.id)} strategy={verticalListSortingStrategy}>
-          {sortTreeNodes(node.children).map((child) => (
+          {node.children.map((child) => (
             <TreeItem
               key={child.id}
               node={child}
@@ -244,6 +251,7 @@ function TreeItem({
               onCreateResearchItem={onCreateResearchItem}
               onImportResearchFiles={onImportResearchFiles}
               documents={documents}
+              dragDisabled={dragDisabled}
             />
           ))}
         </SortableContext>
@@ -300,6 +308,69 @@ function filterTree(nodes: FileNode[], query: string, documents?: Record<string,
   return result
 }
 
+type NodeLocation = {
+  parentId: string | null
+  index: number
+}
+
+function findNodeLocation(nodes: FileNode[], id: string, parentId: string | null = null): NodeLocation | null {
+  for (let index = 0; index < nodes.length; index += 1) {
+    const node = nodes[index]
+    if (node.id === id) {
+      return { parentId, index }
+    }
+
+    if (node.type === "folder" && node.children?.length) {
+      const nested = findNodeLocation(node.children, id, node.id)
+      if (nested) return nested
+    }
+  }
+
+  return null
+}
+
+function getChildrenAtParent(nodes: FileNode[], parentId: string | null): FileNode[] {
+  if (parentId === null) return nodes
+  const [parentNode] = findNode(nodes, parentId)
+  if (!parentNode || parentNode.type !== "folder") return []
+  return parentNode.children || []
+}
+
+function insertNodeAtIndex(nodes: FileNode[], parentId: string | null, index: number, node: FileNode): FileNode[] {
+  const nodeToInsert: FileNode = {
+    ...node,
+    parentId,
+  }
+
+  if (parentId === null) {
+    const nextNodes = [...nodes]
+    const safeIndex = Math.max(0, Math.min(index, nextNodes.length))
+    nextNodes.splice(safeIndex, 0, nodeToInsert)
+    return nextNodes
+  }
+
+  return nodes.map((entry) => {
+    if (entry.id === parentId && entry.type === "folder") {
+      const nextChildren = [...(entry.children || [])]
+      const safeIndex = Math.max(0, Math.min(index, nextChildren.length))
+      nextChildren.splice(safeIndex, 0, nodeToInsert)
+      return {
+        ...entry,
+        children: nextChildren,
+      }
+    }
+
+    if (entry.type === "folder" && entry.children?.length) {
+      return {
+        ...entry,
+        children: insertNodeAtIndex(entry.children, parentId, index, nodeToInsert),
+      }
+    }
+
+    return entry
+  })
+}
+
 export default function FileSidebar({
   initialTree,
   onTreeChange,
@@ -323,6 +394,8 @@ export default function FileSidebar({
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({})
   const [moveNotification, setMoveNotification] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
+  const pendingFolderExpandIdRef = useRef<string | null>(null)
+  const pendingFolderExpandTimerRef = useRef<number | null>(null)
 
   // Dialogs state
   const [renameDialogOpen, setRenameDialogOpen] = useState(false)
@@ -330,6 +403,26 @@ export default function FileSidebar({
   const [newName, setNewName] = useState("")
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [itemToDelete, setItemToDelete] = useState<string | null>(null)
+
+  const isSearchActive = searchQuery.trim().length > 0
+
+  const collisionDetectionStrategy = useMemo<CollisionDetection>(() => {
+    return (args) => {
+      const pointerCollisions = pointerWithin(args)
+      if (pointerCollisions.length > 0) {
+        return pointerCollisions
+      }
+      return closestCenter(args)
+    }
+  }, [])
+
+  const clearPendingFolderExpand = () => {
+    if (pendingFolderExpandTimerRef.current !== null) {
+      window.clearTimeout(pendingFolderExpandTimerRef.current)
+      pendingFolderExpandTimerRef.current = null
+    }
+    pendingFolderExpandIdRef.current = null
+  }
 
   // Update tree when initialTree changes
   useEffect(() => {
@@ -346,22 +439,76 @@ export default function FileSidebar({
             children: [],
           },
         ]
-    const sortedNodes = sortTreeNodes(fileNodes)
-    setTree(sortedNodes)
+    setTree(fileNodes)
 
-    // Expand top-level and any folders that actually exist
-    const folderIds = collectFolderIds(sortedNodes)
-    const nextExpanded: Record<string, boolean> = {}
-    for (const id of folderIds) nextExpanded[id] = true
-    setExpandedNodes(nextExpanded)
+    // Preserve expand/collapse choices across tree updates.
+    const folderIds = collectFolderIds(fileNodes)
+    setExpandedNodes((prev) => {
+      const nextExpanded: Record<string, boolean> = {}
+      for (const id of folderIds) {
+        nextExpanded[id] = Object.keys(prev).length === 0 ? true : (prev[id] ?? true)
+      }
+      return nextExpanded
+    })
   }, [initialTree])
 
+  useEffect(() => {
+    return () => {
+      clearPendingFolderExpand()
+    }
+  }, [])
+
   const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 5 } }), useSensor(TouchSensor))
+  const activeSensors = isSearchActive ? [] : sensors
+
+  function handleDragOver(ev: DragOverEvent) {
+    if (isSearchActive) return
+
+    const overId = ev.over?.id as string | undefined
+    if (!overId) {
+      clearPendingFolderExpand()
+      return
+    }
+
+    const [overNode] = findNode(tree, overId)
+    if (overNode?.type !== "folder" || expandedNodes[overNode.id]) {
+      clearPendingFolderExpand()
+      return
+    }
+
+    if (pendingFolderExpandIdRef.current === overNode.id) return
+
+    clearPendingFolderExpand()
+    pendingFolderExpandIdRef.current = overNode.id
+    pendingFolderExpandTimerRef.current = window.setTimeout(() => {
+      setExpandedNodes((prev) => {
+        if (prev[overNode.id]) return prev
+        return {
+          ...prev,
+          [overNode.id]: true,
+        }
+      })
+      pendingFolderExpandIdRef.current = null
+      pendingFolderExpandTimerRef.current = null
+    }, 220)
+  }
+
+  function handleDragCancel() {
+    setActiveId(null)
+    clearPendingFolderExpand()
+  }
+
+  function handleDragStart(id: string) {
+    if (isSearchActive) return
+    setActiveId(id)
+  }
 
   function handleDragEnd(ev: DragEndEvent) {
+    clearPendingFolderExpand()
     const { active, over } = ev
     setActiveId(null)
 
+    if (isSearchActive) return
     if (!over || active.id === over.id) return
 
     // 1. Pull active node out of tree
@@ -377,7 +524,22 @@ export default function FileSidebar({
     }
 
     const [overNode] = findNode(tree, over.id as string)
-    const targetFolderId = overNode?.type === "folder" ? overNode.id : (overNode?.parentId ?? null)
+    if (!overNode) return
+
+    const translatedRect = active.rect.current.translated
+    const fallbackRect = active.rect.current.initial ?? over.rect
+    const sourceRect = translatedRect ?? fallbackRect
+    const draggedCenterY = sourceRect.top + sourceRect.height / 2
+    const overTop = over.rect.top
+    const overHeight = over.rect.height
+    const overMiddleY = overTop + overHeight / 2
+    const folderCenterTop = overTop + overHeight * 0.45
+    const folderCenterBottom = overTop + overHeight * 0.55
+    const canDropIntoFolderCenter = overNode.type === "folder" && Boolean(expandedNodes[overNode.id])
+    const dropIntoFolderCenter =
+      canDropIntoFolderCenter && draggedCenterY >= folderCenterTop && draggedCenterY <= folderCenterBottom
+
+    const targetFolderId = dropIntoFolderCenter ? overNode.id : (overNode.parentId ?? null)
 
     if (draggedNode.type === "folder" && targetFolderId && isDescendant(targetFolderId, draggedNode.id)) {
       setMoveNotification("Cannot move a folder into itself")
@@ -386,13 +548,23 @@ export default function FileSidebar({
     }
 
     let newTree = removeNode(tree, active.id as string)
+    let destinationParentId: string | null = targetFolderId
+    let destinationIndex = 0
 
-    // 3. Insert it
-    draggedNode.parentId = targetFolderId
-    newTree = insertNode(newTree, targetFolderId, draggedNode)
+    if (dropIntoFolderCenter) {
+      destinationIndex = getChildrenAtParent(newTree, targetFolderId).length
+    } else {
+      const overLocation = findNodeLocation(newTree, over.id as string)
+      if (!overLocation) return
+      destinationParentId = overLocation.parentId
+      destinationIndex = overLocation.index + (draggedCenterY < overMiddleY ? 0 : 1)
+    }
 
-    // 4. Sort the tree to maintain hierarchy and sort folders before files at each level
-    newTree = sortTreeNodes(newTree)
+    const movedNode: FileNode = {
+      ...draggedNode,
+      parentId: destinationParentId,
+    }
+    newTree = insertNodeAtIndex(newTree, destinationParentId, destinationIndex, movedNode)
 
     setTree(newTree)
 
@@ -401,7 +573,7 @@ export default function FileSidebar({
     onTreeChange(convertedTree)
 
     // Expand the target folder if it's a folder
-    if (overNode?.type === "folder") {
+    if (overNode.type === "folder") {
       setExpandedNodes((prev) => ({
         ...prev,
         [overNode.id]: true,
@@ -655,19 +827,26 @@ export default function FileSidebar({
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
+        {isSearchActive && (
+          <p className="mt-2 px-1 text-[11px] text-muted-foreground">
+            Reordering is disabled while search is active. Clear search to drag items.
+          </p>
+        )}
       </div>
 
       <div className="flex-1 min-h-0 overflow-auto px-1 pb-2">
         <ContextMenu>
           <ContextMenuTrigger className="flex-1 h-full">
             <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragStart={(e) => setActiveId(e.active.id as string)}
+              sensors={activeSensors}
+              collisionDetection={collisionDetectionStrategy}
+              onDragStart={(e) => handleDragStart(e.active.id as string)}
+              onDragOver={handleDragOver}
+              onDragCancel={handleDragCancel}
               onDragEnd={handleDragEnd}
             >
               <SortableContext id="ROOT" items={filteredTree.map((n) => n.id)} strategy={verticalListSortingStrategy}>
-                {sortTreeNodes(filteredTree).map((node) => (
+                {filteredTree.map((node) => (
                   <TreeItem
                     key={node.id}
                     node={node}
@@ -684,6 +863,7 @@ export default function FileSidebar({
                     onCreateResearchItem={handleCreateResearchItem}
                     onImportResearchFiles={handleImportResearchFiles}
                     documents={documents}
+                    dragDisabled={isSearchActive}
                   />
                 ))}
               </SortableContext>

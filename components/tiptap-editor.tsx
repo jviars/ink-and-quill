@@ -18,8 +18,13 @@ import {
   FileQuestionIcon as FileBreak,
   Save,
   MessageSquarePlus,
+  Search,
+  ChevronUp,
+  ChevronDown,
+  X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTheme } from "next-themes"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -78,6 +83,11 @@ interface SlashMenuState {
   }
 }
 
+interface FindMatch {
+  from: number
+  to: number
+}
+
 const SLASH_COMMANDS: SlashCommand[] = [
   {
     id: "text",
@@ -134,6 +144,11 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange, on
   const [showSaveNotification, setShowSaveNotification] = useState(false)
   const [slashMenu, setSlashMenu] = useState<SlashMenuState | null>(null)
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
+  const [findBarOpen, setFindBarOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState("")
+  const [findMatches, setFindMatches] = useState<FindMatch[]>([])
+  const [activeFindMatchIndex, setActiveFindMatchIndex] = useState(0)
+  const findInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     setMounted(true)
@@ -487,6 +502,174 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange, on
     }
   }, [slashSelectedIndex, filteredSlashCommands.length])
 
+  const collectFindMatches = useCallback(
+    (query: string): FindMatch[] => {
+      if (!editor) return []
+
+      const normalizedQuery = query.trim().toLowerCase()
+      if (!normalizedQuery) return []
+
+      const matches: FindMatch[] = []
+
+      editor.state.doc.descendants((node, pos) => {
+        if (!node.isText || !node.text) return true
+
+        const lowerText = node.text.toLowerCase()
+        let searchIndex = 0
+
+        while (searchIndex <= lowerText.length - normalizedQuery.length) {
+          const foundAt = lowerText.indexOf(normalizedQuery, searchIndex)
+          if (foundAt === -1) break
+
+          const from = pos + foundAt
+          matches.push({
+            from,
+            to: from + normalizedQuery.length,
+          })
+
+          searchIndex = foundAt + Math.max(normalizedQuery.length, 1)
+        }
+
+        return true
+      })
+
+      return matches
+    },
+    [editor],
+  )
+
+  const scrollMatchIntoView = useCallback(
+    (from: number) => {
+      if (!editor || !scrollContainerRef.current) return
+
+      try {
+        const coords = editor.view.coordsAtPos(from)
+        const container = scrollContainerRef.current
+        const containerRect = container.getBoundingClientRect()
+        const offsetTop = coords.top - containerRect.top + container.scrollTop
+        const targetTop = Math.max(0, offsetTop - container.clientHeight / 2)
+        container.scrollTo({ top: targetTop, behavior: "smooth" })
+      } catch {
+        // Ignore invalid positions that can happen during rapid document updates.
+      }
+    },
+    [editor],
+  )
+
+  const goToFindMatch = useCallback(
+    (targetIndex: number) => {
+      if (!editor || findMatches.length === 0) return
+
+      const nextIndex = ((targetIndex % findMatches.length) + findMatches.length) % findMatches.length
+      const match = findMatches[nextIndex]
+      editor.chain().focus().setTextSelection({ from: match.from, to: match.to }).scrollIntoView().run()
+      scrollMatchIntoView(match.from)
+      setActiveFindMatchIndex(nextIndex)
+    },
+    [editor, findMatches, scrollMatchIntoView],
+  )
+
+  useEffect(() => {
+    if (!editor) return
+
+    const normalizedQuery = findQuery.trim()
+    if (!normalizedQuery) {
+      setFindMatches([])
+      setActiveFindMatchIndex(0)
+      return
+    }
+
+    const nextMatches = collectFindMatches(normalizedQuery)
+    setFindMatches(nextMatches)
+
+    if (nextMatches.length === 0) {
+      setActiveFindMatchIndex(0)
+      return
+    }
+
+    const selectionFrom = editor.state.selection.from
+    const selectedMatchIndex = nextMatches.findIndex((match) => selectionFrom >= match.from && selectionFrom <= match.to)
+    const initialIndex = selectedMatchIndex >= 0 ? selectedMatchIndex : 0
+
+    editor
+      .chain()
+      .focus()
+      .setTextSelection({
+        from: nextMatches[initialIndex].from,
+        to: nextMatches[initialIndex].to,
+      })
+      .scrollIntoView()
+      .run()
+    scrollMatchIntoView(nextMatches[initialIndex].from)
+    setActiveFindMatchIndex(initialIndex)
+  }, [editor, findQuery, collectFindMatches, scrollMatchIntoView])
+
+  useEffect(() => {
+    if (!editor || !findBarOpen || !findQuery.trim()) return
+
+    const refreshMatchesOnEdit = () => {
+      const nextMatches = collectFindMatches(findQuery)
+      setFindMatches(nextMatches)
+      setActiveFindMatchIndex((currentIndex) => {
+        if (nextMatches.length === 0) return 0
+        return Math.min(currentIndex, nextMatches.length - 1)
+      })
+    }
+
+    editor.on("transaction", refreshMatchesOnEdit)
+    return () => {
+      editor.off("transaction", refreshMatchesOnEdit)
+    }
+  }, [editor, findBarOpen, findQuery, collectFindMatches])
+
+  useEffect(() => {
+    if (!editor) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const isFindShortcut = (event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "f"
+      if (isFindShortcut) {
+        event.preventDefault()
+        event.stopPropagation()
+        closeSlashMenu()
+        setFindBarOpen(true)
+
+        const selectedText = editor.state.doc
+          .textBetween(editor.state.selection.from, editor.state.selection.to, " ", " ")
+          .trim()
+        if (selectedText) {
+          setFindQuery(selectedText)
+        }
+
+        requestAnimationFrame(() => {
+          findInputRef.current?.focus()
+          findInputRef.current?.select()
+        })
+        return
+      }
+
+      if (!findBarOpen) return
+
+      if (event.key === "Escape") {
+        event.preventDefault()
+        setFindBarOpen(false)
+        editor.chain().focus().run()
+        return
+      }
+
+      if (event.key === "Enter") {
+        event.preventDefault()
+        if (event.shiftKey) {
+          goToFindMatch(activeFindMatchIndex - 1)
+        } else {
+          goToFindMatch(activeFindMatchIndex + 1)
+        }
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown, true)
+    return () => window.removeEventListener("keydown", handleKeyDown, true)
+  }, [editor, closeSlashMenu, findBarOpen, activeFindMatchIndex, goToFindMatch])
+
   if (!mounted) {
     return null
   }
@@ -501,9 +684,9 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange, on
 
   const getToolbarButtonClass = () => {
     if (isDark) {
-      return "text-slate-100 hover:bg-white/10"
+      return "soft-hover-box text-slate-100"
     }
-    return ""
+    return "soft-hover-box text-foreground"
   }
 
   // Updated to provide theme-specific paper, text colors, and floating aesthetics
@@ -795,10 +978,10 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange, on
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <div className="flex items-center">
+                  <div className="soft-hover-box flex items-center rounded-md px-1">
                     <Type className="h-4 w-4 mr-1" />
                     <Select value={fontSize} onValueChange={handleFontSizeChange}>
-                      <SelectTrigger className="w-16 h-8 border-none">
+                      <SelectTrigger className="soft-hover-box h-8 w-16 border-none bg-transparent px-2 shadow-none focus:ring-0 focus:ring-offset-0">
                         <SelectValue placeholder="Size" />
                       </SelectTrigger>
                       <SelectContent>
@@ -845,6 +1028,71 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange, on
           ref={scrollContainerRef}
           className={`editor-scroll-container relative ${compactMode ? "min-h-[320px] overflow-auto" : "flex-1 min-h-0 overflow-auto"} overflow-x-hidden ${getEditorBackgroundClass()}`}
         >
+          {findBarOpen && (
+            <div
+              className={`absolute right-4 top-4 z-[80] flex w-[min(420px,calc(100%-2rem))] items-center gap-2 rounded-lg border px-2 py-2 shadow-lg backdrop-blur ${isDark ? "border-white/20 bg-slate-900/90" : "border-slate-200 bg-white/95"
+                }`}
+            >
+              <Search className={`h-4 w-4 shrink-0 ${isDark ? "text-slate-300" : "text-slate-500"}`} />
+              <Input
+                ref={findInputRef}
+                value={findQuery}
+                onChange={(event) => setFindQuery(event.target.value)}
+                placeholder="Find in document"
+                aria-label="Find in document"
+                className={`h-8 border-none bg-transparent px-1 py-0 text-sm focus-visible:ring-0 ${isDark ? "text-slate-100 placeholder:text-slate-400" : "text-slate-900 placeholder:text-slate-500"
+                  }`}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault()
+                    if (event.shiftKey) {
+                      goToFindMatch(activeFindMatchIndex - 1)
+                    } else {
+                      goToFindMatch(activeFindMatchIndex + 1)
+                    }
+                  }
+                }}
+              />
+              <span className={`min-w-[52px] text-right text-xs ${isDark ? "text-slate-300" : "text-slate-500"}`}>
+                {findMatches.length === 0 ? "0/0" : `${activeFindMatchIndex + 1}/${findMatches.length}`}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0"
+                onClick={() => goToFindMatch(activeFindMatchIndex - 1)}
+                disabled={findMatches.length === 0}
+                aria-label="Previous match"
+              >
+                <ChevronUp className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0"
+                onClick={() => goToFindMatch(activeFindMatchIndex + 1)}
+                disabled={findMatches.length === 0}
+                aria-label="Next match"
+              >
+                <ChevronDown className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0"
+                onClick={() => {
+                  setFindBarOpen(false)
+                  editor?.chain().focus().run()
+                }}
+                aria-label="Close find bar"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
           <div
             className="editor-wrapper mx-auto my-4 paper-animation"
             style={{

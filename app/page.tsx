@@ -231,6 +231,7 @@ export default function Dashboard() {
   const [preferencesLoaded, setPreferencesLoaded] = useState(false)
   const [isProjectBootstrapComplete, setIsProjectBootstrapComplete] = useState(false)
   const [startupMessage, setStartupMessage] = useState<string | null>(null)
+  const [startupMessageDismissed, setStartupMessageDismissed] = useState(false)
   const [sessionStartedAt, setSessionStartedAt] = useState<string>(new Date().toISOString())
   const [sessionStartWordCount, setSessionStartWordCount] = useState(0)
   const [quickReferenceOpen, setQuickReferenceOpen] = useState(true)
@@ -318,6 +319,12 @@ export default function Dashboard() {
   }, [preferencesLoaded, theme])
 
   useEffect(() => {
+    if (startupMessage) {
+      setStartupMessageDismissed(false)
+    }
+  }, [startupMessage])
+
+  useEffect(() => {
     if (projectSettings.compilePresets.length === 0) return
 
     const isSelectedValid = projectSettings.compilePresets.some((preset) => preset.id === selectedCompilePresetId)
@@ -342,14 +349,48 @@ export default function Dashboard() {
     return typeof value === "string" && value.trim() ? value.trim() : "Untitled Project"
   }
 
-  const normalizeDialogPath = (selection: unknown): string | null => {
-    if (typeof selection === "string" && selection) return selection
-    if (Array.isArray(selection) && typeof selection[0] === "string" && selection[0]) return selection[0]
-    if (selection && typeof selection === "object") {
-      const maybePath = (selection as { path?: unknown }).path
-      if (typeof maybePath === "string" && maybePath) return maybePath
+  const normalizeFilePath = (value: string): string => {
+    const trimmed = value.trim()
+    if (!trimmed.toLowerCase().startsWith("file://")) return trimmed
+
+    try {
+      const parsed = new URL(trimmed)
+      let pathname = decodeURIComponent(parsed.pathname || "")
+      if (/^\/[a-zA-Z]:/.test(pathname)) {
+        pathname = pathname.slice(1)
+      }
+      return pathname || trimmed
+    } catch {
+      const withoutScheme = trimmed.replace(/^file:\/\//i, "")
+      return decodeURIComponent(withoutScheme.replace(/^\/([a-zA-Z]:)/, "$1"))
     }
-    return null
+  }
+
+  const normalizeDialogPath = (selection: unknown): string | null => {
+    const normalizeCandidate = (candidate: unknown): string | null => {
+      if (typeof candidate === "string" && candidate.trim()) {
+        return normalizeFilePath(candidate)
+      }
+
+      if (candidate && typeof candidate === "object") {
+        const maybePath = (candidate as { path?: unknown }).path
+        if (typeof maybePath === "string" && maybePath.trim()) {
+          return normalizeFilePath(maybePath)
+        }
+      }
+
+      return null
+    }
+
+    if (Array.isArray(selection)) {
+      for (const entry of selection) {
+        const normalized = normalizeCandidate(entry)
+        if (normalized) return normalized
+      }
+      return null
+    }
+
+    return normalizeCandidate(selection)
   }
 
   const findPreferredDocumentId = (nodes: TreeNode[]): string | null => {
@@ -569,6 +610,10 @@ export default function Dashboard() {
         showProjectSavedNotification()
       } catch (error) {
         console.error("Failed to open project:", error)
+        if (fileInputRef.current) {
+          fileInputRef.current.click()
+          return
+        }
         alert(`Error loading project: ${error instanceof Error ? error.message : "Unknown error"}`)
       }
       return
@@ -1970,9 +2015,26 @@ export default function Dashboard() {
         </div>
       )}
 
-      {startupMessage && (
-        <div className="fixed bottom-4 left-4 max-w-[min(640px,calc(100vw-2rem))] rounded border border-amber-400/40 bg-amber-500/20 px-4 py-2 text-sm text-amber-100 shadow-lg">
-          {startupMessage}
+      {startupMessage && !startupMessageDismissed && (
+        <div className="fixed bottom-4 left-4 z-[90] flex w-[min(720px,calc(100vw-2rem))] items-start gap-3 rounded-md border border-amber-700 bg-amber-900 px-4 py-3 text-sm text-amber-50 shadow-xl">
+          <p className="flex-1 leading-relaxed">{startupMessage}</p>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              className="rounded-md px-2 py-1 text-xs font-medium text-amber-100 transition-colors hover:bg-amber-800 hover:text-white"
+              onClick={handleOpenProjectFile}
+            >
+              Open Project
+            </button>
+            <button
+              type="button"
+              className="rounded-md p-1 text-amber-100 transition-colors hover:bg-amber-800 hover:text-white"
+              onClick={() => setStartupMessageDismissed(true)}
+              aria-label="Dismiss startup message"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       )}
 

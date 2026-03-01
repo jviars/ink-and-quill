@@ -26,7 +26,7 @@ export function GlassIconButton({ className, active = false, ...props }: GlassIc
     <Button
       variant="ghost"
       size="icon"
-      className={cn("glass-icon-button", active && "glass-icon-button-active", className)}
+      className={cn("glass-icon-button soft-hover-box", active && "glass-icon-button-active", className)}
       {...props}
     />
   )

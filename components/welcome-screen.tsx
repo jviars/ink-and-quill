@@ -47,6 +47,50 @@ function isProjectValid(project: QuillProject | null): project is QuillProject {
   return Boolean(project?.metadata && Array.isArray(project.treeStructure) && project.documents)
 }
 
+function normalizeFilePath(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed.toLowerCase().startsWith("file://")) return trimmed
+
+  try {
+    const parsed = new URL(trimmed)
+    let pathname = decodeURIComponent(parsed.pathname || "")
+    if (/^\/[a-zA-Z]:/.test(pathname)) {
+      pathname = pathname.slice(1)
+    }
+    return pathname || trimmed
+  } catch {
+    const withoutScheme = trimmed.replace(/^file:\/\//i, "")
+    return decodeURIComponent(withoutScheme.replace(/^\/([a-zA-Z]:)/, "$1"))
+  }
+}
+
+function normalizeDialogPath(selection: unknown): string | null {
+  const normalizeCandidate = (candidate: unknown): string | null => {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return normalizeFilePath(candidate)
+    }
+
+    if (candidate && typeof candidate === "object") {
+      const maybePath = (candidate as { path?: unknown }).path
+      if (typeof maybePath === "string" && maybePath.trim()) {
+        return normalizeFilePath(maybePath)
+      }
+    }
+
+    return null
+  }
+
+  if (Array.isArray(selection)) {
+    for (const entry of selection) {
+      const normalized = normalizeCandidate(entry)
+      if (normalized) return normalized
+    }
+    return null
+  }
+
+  return normalizeCandidate(selection)
+}
+
 export function WelcomeScreen({ onCreateProject, onOpenProject }: WelcomeScreenProps) {
   const [animationReady, setAnimationReady] = useState(false)
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([])
@@ -119,14 +163,18 @@ export function WelcomeScreen({ onCreateProject, onOpenProject }: WelcomeScreenP
       setError(null)
 
       if (isTauri) {
+        if (!window.__TAURI__?.dialog?.open || !window.__TAURI__?.fs?.readBinaryFile) {
+          throw new Error("Native file picker APIs are unavailable.")
+        }
+
         const selected = await window.__TAURI__.dialog.open({
           multiple: false,
           filters: [{ name: "Quill Projects", extensions: ["quill"] }],
         })
 
-        if (!selected) return
+        const filePath = normalizeDialogPath(selected)
+        if (!filePath) return
 
-        const filePath = selected as string
         const fileContent = await window.__TAURI__.fs.readBinaryFile(filePath)
         const project = await loadProjectZip(fileContent, filePath)
         await addRecentProject(project.metadata.name, filePath)
@@ -268,7 +316,7 @@ export function WelcomeScreen({ onCreateProject, onOpenProject }: WelcomeScreenP
               <div className="grid gap-3 sm:grid-cols-2">
                 <button
                   type="button"
-                  className="rounded-xl border border-white/10 bg-white/5 p-4 text-left transition-colors hover:bg-white/10"
+                  className="rounded-xl border border-white/10 bg-white/5 p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-white/10 hover:shadow-lg"
                   onClick={handleNewProject}
                   disabled={isLoading}
                 >
@@ -281,7 +329,7 @@ export function WelcomeScreen({ onCreateProject, onOpenProject }: WelcomeScreenP
 
                 <button
                   type="button"
-                  className="rounded-xl border border-white/10 bg-white/5 p-4 text-left transition-colors hover:bg-white/10"
+                  className="rounded-xl border border-white/10 bg-white/5 p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-white/10 hover:shadow-lg"
                   onClick={handleOpenProject}
                   disabled={isLoading}
                 >
@@ -330,7 +378,7 @@ export function WelcomeScreen({ onCreateProject, onOpenProject }: WelcomeScreenP
                       key={typeof project.path === "string" ? project.path : String(project.path)}
                       type="button"
                       onClick={() => handleOpenRecent(project)}
-                      className="flex w-full flex-col rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-left transition-colors hover:bg-white/10"
+                      className="flex w-full flex-col rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-left transition-all duration-200 hover:border-primary/35 hover:bg-white/10 hover:shadow-md"
                       disabled={isLoading}
                     >
                       <span className="truncate text-sm font-medium">
