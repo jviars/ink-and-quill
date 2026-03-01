@@ -7,7 +7,7 @@
     "withGlobalTauri": true
   },
   "package": {
-    "productName": "Ink & Quill",
+    "productName": "Ink and Quill",
     "version": "0.2.0"
   },
   "tauri": {
