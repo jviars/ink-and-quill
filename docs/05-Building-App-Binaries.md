@@ -1,6 +1,8 @@
 # 05. Building App Binaries
 
-Ink & Quill is built to automatically generate native application binaries for macOS, Windows, and Linux whenever you push a new release to GitHub. This process is handled by a Continuous Integration (CI) pipeline powered by **GitHub Actions**.
+Ink and Quill is built to automatically generate native application binaries for macOS, Windows, and Linux whenever you push a new release to GitHub. This process is handled by a Continuous Integration (CI) pipeline powered by **GitHub Actions**.
+
+> **Note on Naming:** The internal project packaging name is set to `Ink and Quill` rather than `Ink & Quill`. Special characters like the ampersand (`&`) cause the Windows WiX compiler and Ubuntu packaging systems to break. The graphical application window will still display `Ink & Quill`, but the underlying package names use `and` for cross-platform stability.
 
 Because each operating system uses different packaging tools (e.g., Xcode for `.dmg`, WiX for `.msi`, and dpkg for `.deb`), the build happens across multiple distinct "virtual machines" on GitHub's servers rather than directly on your computer.
 
@@ -45,12 +47,16 @@ You can manually kick off the build pipeline from your web browser or from the c
 
 ## How to Trigger a Build Automatically (via Git Tags)
 
-If you are ready to publish a new official version, the best practice is to tag your release.
+To create a scalable and properly versioned application, you must increment the version numbers within the project's configurations before making a release.
 
-1. Commit your codebase changes:
+1. **Bump the Application Version**:
+   - Open `package.json` and update the `"version"` field (e.g., from `"0.2.0"` to `"0.3.0"`).
+   - Open `src-tauri/tauri.conf.json` and update the `"version"` field to match exactly.
+
+2. Commit your version-bump codebase changes:
    ```bash
    git add .
-   git commit -m "feat: adding new document features"
+   git commit -m "chore: bump version to v0.3.0"
    ```
 2. Create an annotated git tag (make sure it starts with 'v'):
    ```bash

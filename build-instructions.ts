@@ -4,18 +4,22 @@
  * After updating the project files, follow these steps to build the application:
  *
  * 1. Clean install dependencies:
- *    rm -rf node_modules package-lock.json
- *    npm install
+ *    rm -rf node_modules pnpm-lock.yaml
+ *    pnpm install
  *
  * 2. Test the Tauri development build:
- *    npm run tauri:dev
+ *    pnpm run tauri:dev
  *
- * 3. Build the production application:
- *    npm run tauri:build
+ * 3. Update the Application Version for Release:
+ *    - Update `"version"` in \`package.json\`
+ *    - Update `"version"` in \`src-tauri/tauri.conf.json\`
  *
- * 4. Find your built application:
- *    - macOS: src-tauri/target/release/bundle/macos/Ink & Quill.app
- *    - Windows: src-tauri/target/release/bundle/msi/Ink & Quill_0.1.0_x64_en-US.msi
+ * 4. Build the production application locally:
+ *    pnpm run tauri:build
+ *
+ * 5. Find your built application:
+ *    - macOS: src-tauri/target/release/bundle/macos/Ink and Quill.app
+ *    - Windows: src-tauri/target/release/bundle/msi/Ink and Quill_0.1.0_x64_en-US.msi
  *    - Linux: src-tauri/target/release/bundle/appimage/ink-and-quill_0.1.0_amd64.AppImage
  *
  * Troubleshooting:
