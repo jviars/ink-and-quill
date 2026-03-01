@@ -19,10 +19,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'pnpm'
 
       - name: Install Rust Stable
         uses: dtolnay/rust-toolchain@stable
@@ -34,7 +40,7 @@ jobs:
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
           
       - name: Install Frontend Dependencies
-        run: npm install
+        run: pnpm install
 
       - name: Build and Release
         uses: tauri-apps/tauri-action@v0
