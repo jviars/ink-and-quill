@@ -64,6 +64,8 @@ xattr -cr /Applications/Ink\ and\ Quill.app
 
 ☕ **If you’d like to help me get an Apple Developer account to sign my apps, please feel free to buy me a coffee! The goal is $99 for the year. Thanks so much.**
 
+buymeacoffee.com/jviars
+
 ---
 
 ### 💻 Development
