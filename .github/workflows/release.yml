@@ -181,7 +181,16 @@ jobs:
         run: |
           New-Item -Path dist/portable -ItemType Directory -Force | Out-Null
           $asset = "dist/portable/Ink-and-Quill_$env:BUILD_VERSION`_$env:MATRIX_LABEL.zip"
-          Compress-Archive -Path "src-tauri/target/release/ink-and-quill.exe" -DestinationPath $asset -Force
+          $exeCandidates = Get-ChildItem -Path "src-tauri/target" -Filter "ink-and-quill.exe" -File -Recurse |
+            Where-Object { $_.FullName -match '[\\/]release[\\/]' -and $_.FullName -notmatch '[\\/]deps[\\/]' }
+          if (-not $exeCandidates) {
+            Write-Host "Unable to locate ink-and-quill.exe. Files under src-tauri/target (first 200):"
+            Get-ChildItem -Path "src-tauri/target" -File -Recurse | Select-Object -First 200 | ForEach-Object { $_.FullName }
+            throw "Portable executable not found under src-tauri/target/**/release"
+          }
+          $exePath = ($exeCandidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+          Write-Host "Using executable: $exePath"
+          Compress-Archive -Path $exePath -DestinationPath $asset -Force
           "asset_path=$asset" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Package macOS Portable
