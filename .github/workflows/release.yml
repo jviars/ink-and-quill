@@ -181,14 +181,47 @@ jobs:
         run: |
           New-Item -Path dist/portable -ItemType Directory -Force | Out-Null
           $asset = "dist/portable/Ink-and-Quill_$env:BUILD_VERSION`_$env:MATRIX_LABEL.zip"
-          $exeCandidates = Get-ChildItem -Path "src-tauri/target" -Filter "ink-and-quill.exe" -File -Recurse |
-            Where-Object { $_.FullName -match '[\\/]release[\\/]' -and $_.FullName -notmatch '[\\/]deps[\\/]' }
-          if (-not $exeCandidates) {
-            Write-Host "Unable to locate ink-and-quill.exe. Files under src-tauri/target (first 200):"
-            Get-ChildItem -Path "src-tauri/target" -File -Recurse | Select-Object -First 200 | ForEach-Object { $_.FullName }
-            throw "Portable executable not found under src-tauri/target/**/release"
+
+          $roots = @("src-tauri/target/release", "target/release")
+          $exeCandidates = @()
+
+          foreach ($root in $roots) {
+            if (Test-Path $root) {
+              $exeCandidates += Get-ChildItem -Path $root -Filter "*.exe" -File -ErrorAction SilentlyContinue
+            }
           }
-          $exePath = ($exeCandidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+
+          if (-not $exeCandidates) {
+            foreach ($root in @("src-tauri/target", "target")) {
+              if (Test-Path $root) {
+                $exeCandidates += Get-ChildItem -Path $root -Filter "*.exe" -File -Recurse -ErrorAction SilentlyContinue |
+                  Where-Object {
+                    $_.FullName -match '[\\/]release[\\/]' -and
+                    $_.FullName -notmatch '[\\/](deps|build|\.fingerprint|bundle|examples|incremental)[\\/]'
+                  }
+              }
+            }
+          }
+
+          $exeCandidates = $exeCandidates | Sort-Object FullName -Unique
+          if (-not $exeCandidates) {
+            Write-Host "Unable to locate a release .exe under src-tauri/target or target. First 300 files:"
+            foreach ($root in @("src-tauri/target", "target")) {
+              if (Test-Path $root) {
+                Write-Host "--- $root ---"
+                Get-ChildItem -Path $root -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 300 | ForEach-Object { $_.FullName }
+              }
+            }
+            throw "Portable executable not found under expected release output folders"
+          }
+
+          $preferred = $exeCandidates | Where-Object { $_.Name -match '(?i)(ink|quill)' } | Sort-Object LastWriteTime -Descending
+          $exePath = if ($preferred) {
+            $preferred[0].FullName
+          } else {
+            ($exeCandidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+          }
+
           Write-Host "Using executable: $exePath"
           Compress-Archive -Path $exePath -DestinationPath $asset -Force
           "asset_path=$asset" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
