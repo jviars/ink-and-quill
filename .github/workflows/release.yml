@@ -17,25 +17,36 @@ jobs:
         include:
           - platform: macos-latest
             label: macos-universal-installer
+            mode: tauri-action
+            macos_target: universal-apple-darwin
             tauri_args: --target universal-apple-darwin --bundles dmg
           - platform: macos-latest
             label: macos-universal-portable
+            mode: portable-manual
+            macos_target: universal-apple-darwin
             tauri_args: --target universal-apple-darwin --bundles app
           - platform: macos-latest
             label: macos-aarch64-installer
+            mode: tauri-action
+            macos_target: aarch64-apple-darwin
             tauri_args: --target aarch64-apple-darwin --bundles dmg
           - platform: macos-latest
             label: macos-aarch64-portable
+            mode: portable-manual
+            macos_target: aarch64-apple-darwin
             tauri_args: --target aarch64-apple-darwin --bundles app
           - platform: ubuntu-22.04
             label: linux-x64
+            mode: tauri-action
             tauri_args: ""
           - platform: windows-latest
             label: windows-installer
+            mode: tauri-action
             tauri_args: --bundles nsis
           - platform: windows-latest
             label: windows-portable
-            tauri_args: --bundles updater
+            mode: portable-manual
+            tauri_args: --bundles none
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -144,6 +155,7 @@ jobs:
         run: pnpm run test:stabilization
 
       - name: Build and Release
+        if: matrix.mode == 'tauri-action'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -154,3 +166,47 @@ jobs:
           releaseBody: 'See the assets to download this version and install.'
           releaseDraft: true
           prerelease: ${{ contains(steps.release_meta.outputs.tag_name, '-') }}
+
+      - name: Build Portable Target
+        if: matrix.mode == 'portable-manual'
+        run: pnpm tauri build ${{ matrix.tauri_args }}
+
+      - name: Package Windows Portable
+        id: package_windows_portable
+        if: matrix.label == 'windows-portable'
+        shell: pwsh
+        env:
+          BUILD_VERSION: ${{ steps.release_meta.outputs.build_version }}
+          MATRIX_LABEL: ${{ matrix.label }}
+        run: |
+          New-Item -Path dist/portable -ItemType Directory -Force | Out-Null
+          $asset = "dist/portable/Ink-and-Quill_$env:BUILD_VERSION`_$env:MATRIX_LABEL.zip"
+          Compress-Archive -Path "src-tauri/target/release/ink-and-quill.exe" -DestinationPath $asset -Force
+          "asset_path=$asset" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Package macOS Portable
+        id: package_macos_portable
+        if: startsWith(matrix.label, 'macos-') && endsWith(matrix.label, '-portable')
+        shell: bash
+        env:
+          BUILD_VERSION: ${{ steps.release_meta.outputs.build_version }}
+          MATRIX_LABEL: ${{ matrix.label }}
+          MACOS_TARGET: ${{ matrix.macos_target }}
+        run: |
+          mkdir -p dist/portable
+          APP_PATH="src-tauri/target/$MACOS_TARGET/release/bundle/macos/Ink and Quill.app"
+          ASSET_PATH="dist/portable/Ink-and-Quill_${BUILD_VERSION}_${MATRIX_LABEL}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ASSET_PATH"
+          echo "asset_path=$ASSET_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Portable Artifact to Release
+        if: matrix.mode == 'portable-manual'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_meta.outputs.tag_name }}
+          name: ${{ steps.release_meta.outputs.release_name }}
+          body: 'See the assets to download this version and install.'
+          draft: true
+          prerelease: ${{ contains(steps.release_meta.outputs.tag_name, '-') }}
+          files: ${{ steps.package_windows_portable.outputs.asset_path || steps.package_macos_portable.outputs.asset_path }}
+          fail_on_unmatched_files: true
