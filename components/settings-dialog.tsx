@@ -817,7 +817,7 @@ export function SettingsDialog({ open, onOpenChange, projectSettings, onProjectS
               <div className="flex justify-center mt-6">
                 <div className="text-center">
                   <h4 className="text-sm font-medium mb-1">Ink & Quill</h4>
-                  <p className="text-xs text-muted-foreground">Version 0.4 beta</p>
+                  <p className="text-xs text-muted-foreground">Version 0.4</p>
                 </div>
               </div>
             </div>

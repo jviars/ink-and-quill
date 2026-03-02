@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "Ink and Quill",
-    "version": "0.4.0-beta"
+    "version": "0.4.0"
   },
   "tauri": {
     "allowlist": {

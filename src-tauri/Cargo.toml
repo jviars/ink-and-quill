@@ -1,6 +1,6 @@
 [package]
 name = "ink-and-quill"
-version = "0.4.0-beta"
+version = "0.4.0"
 description = "A writing project management application"
 authors = ["jviars"]
 license = ""
