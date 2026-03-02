@@ -8,6 +8,7 @@ on:
 
 jobs:
   publish-tauri:
+    name: Publish (${{ matrix.label }})
     permissions:
       contents: write
     strategy:
@@ -15,17 +16,26 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            label: macos-universal
-            tauri_args: --target universal-apple-darwin
+            label: macos-universal-installer
+            tauri_args: --target universal-apple-darwin --bundles dmg
           - platform: macos-latest
-            label: macos-aarch64
-            tauri_args: --target aarch64-apple-darwin
+            label: macos-universal-portable
+            tauri_args: --target universal-apple-darwin --bundles app
+          - platform: macos-latest
+            label: macos-aarch64-installer
+            tauri_args: --target aarch64-apple-darwin --bundles dmg
+          - platform: macos-latest
+            label: macos-aarch64-portable
+            tauri_args: --target aarch64-apple-darwin --bundles app
           - platform: ubuntu-22.04
             label: linux-x64
             tauri_args: ""
           - platform: windows-latest
-            label: windows-x64
-            tauri_args: ""
+            label: windows-installer
+            tauri_args: --bundles nsis
+          - platform: windows-latest
+            label: windows-portable
+            tauri_args: --bundles updater
 
     runs-on: ${{ matrix.platform }}
     steps:
