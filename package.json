@@ -7,6 +7,7 @@
     "dev": "next dev",
     "export": "next build",
     "lint": "next lint",
+    "test:stabilization": "node --import tsx scripts/phase7-release-check.ts",
     "start": "next start",
     "tauri:build": "tauri build",
     "tauri:dev": "tauri dev"
