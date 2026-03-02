@@ -15,8 +15,17 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
+            label: macos-universal
+            tauri_args: --target universal-apple-darwin
+          - platform: macos-latest
+            label: macos-aarch64
+            tauri_args: --target aarch64-apple-darwin
           - platform: ubuntu-22.04
+            label: linux-x64
+            tauri_args: ""
           - platform: windows-latest
+            label: windows-x64
+            tauri_args: ""
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -35,6 +44,10 @@ jobs:
 
       - name: Install Rust Stable
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install macOS Rust Targets
+        if: matrix.platform == 'macos-latest'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
       - name: Install Ubuntu Dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -125,6 +138,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          args: ${{ matrix.tauri_args }}
           tagName: ${{ steps.release_meta.outputs.tag_name }}
           releaseName: ${{ steps.release_meta.outputs.release_name }}
           releaseBody: 'See the assets to download this version and install.'
