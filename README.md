@@ -37,7 +37,10 @@ Please reach out and tell me if a feature that you use in other writing apps is 
 ![Tauri](https://img.shields.io/badge/tauri-%2324C8DB.svg?style=for-the-badge&logo=tauri&logoColor=%23FFFFFF)
 ![TailwindCSS](https://img.shields.io/badge/tailwindcss-%2338B2AC.svg?style=for-the-badge&logo=tailwind-css&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/typescript-%23007ACC.svg?style=for-the-badge&logo=typescript&logoColor=white)
-![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)
+
+<img width="1790" height="1062" alt="quill1" src="https://github.com/user-attachments/assets/508eb293-857f-4492-8eda-ce65be87dd12" />
+<img width="1792" height="1056" alt="quill2" src="https://github.com/user-attachments/assets/7ebfb6fe-a33b-4394-ab95-4c0e6a85f5a0" />
+
 
 ---
 
