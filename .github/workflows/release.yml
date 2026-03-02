@@ -13,7 +13,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-latest, ubuntu-22.04, windows-latest]
+        include:
+          - platform: macos-latest
+          - platform: ubuntu-22.04
+          - platform: windows-latest
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -42,6 +45,72 @@ jobs:
       - name: Install Frontend Dependencies
         run: pnpm install
 
+      - name: Derive Release Metadata
+        id: release_meta
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            throw "Missing github.ref_name"
+          }
+
+          $rawVersion = $tag.TrimStart('v')
+          if ($rawVersion -notmatch '^(?<major>\d+)\.(?<minor>\d+)(?:\.(?<patch>\d+))?(?:-(?<prerelease>[0-9A-Za-z\.-]+))?$') {
+            throw "Tag '$tag' must match vMAJOR.MINOR[.PATCH][-PRERELEASE]"
+          }
+
+          $major = $Matches.major
+          $minor = $Matches.minor
+          $patch = if ($Matches.patch) { $Matches.patch } else { "0" }
+          $prerelease = $Matches.prerelease
+          $coreVersion = "$major.$minor.$patch"
+
+          # MSI on Windows cannot use alpha labels like '-beta'; enforce a safe numeric app version.
+          $buildVersion = if ("${{ matrix.platform }}" -eq "windows-latest") {
+            $coreVersion
+          } else {
+            if ([string]::IsNullOrWhiteSpace($prerelease)) {
+              $coreVersion
+            } else {
+              "$coreVersion-$prerelease"
+            }
+          }
+
+          "tag_name=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "build_version=$buildVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "release_name=${{ github.event.repository.name }} $tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Apply Build Version to Manifests
+        shell: pwsh
+        env:
+          BUILD_VERSION: ${{ steps.release_meta.outputs.build_version }}
+        run: |
+          $script = @'
+          const fs = require("fs");
+          const version = process.env.BUILD_VERSION;
+          if (!version) {
+            throw new Error("BUILD_VERSION is missing");
+          }
+
+          const pkgPath = "package.json";
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+          pkg.version = version;
+          fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+
+          const tauriPath = "src-tauri/tauri.conf.json";
+          const tauri = JSON.parse(fs.readFileSync(tauriPath, "utf8"));
+          tauri.package.version = version;
+          fs.writeFileSync(tauriPath, JSON.stringify(tauri, null, 2) + "\n");
+
+          const cargoPath = "src-tauri/Cargo.toml";
+          let cargo = fs.readFileSync(cargoPath, "utf8");
+          cargo = cargo.replace(/^version\s*=\s*"[^"]+"/m, 'version = "' + version + '"');
+          fs.writeFileSync(cargoPath, cargo);
+
+          console.log(`Applied build version ${version} for CI packaging.`);
+          '@
+          node -e $script
+
       - name: Lint
         run: pnpm run lint
 
@@ -56,8 +125,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v__VERSION__ 
-          releaseName: 'Ink & Quill v__VERSION__'
+          tagName: ${{ steps.release_meta.outputs.tag_name }}
+          releaseName: ${{ steps.release_meta.outputs.release_name }}
           releaseBody: 'See the assets to download this version and install.'
           releaseDraft: true
-          prerelease: false
+          prerelease: ${{ contains(steps.release_meta.outputs.tag_name, '-') }}
