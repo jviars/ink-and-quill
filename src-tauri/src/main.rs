@@ -41,8 +41,11 @@ fn build_menu() -> Menu {
 }
 
 fn main() {
-    tauri::Builder::default()
-        .menu(build_menu())
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(build_menu());
+
+    builder
         .on_menu_event(|event| {
             let window = event.window();
 

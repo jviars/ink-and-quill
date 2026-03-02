@@ -1,8 +1,8 @@
 [package]
 name = "ink-and-quill"
-version = "0.2.0"
+version = "0.4.0-beta"
 description = "A writing project management application"
-authors = ["you"]
+authors = ["Joshua Viars"]
 license = ""
 repository = ""
 edition = "2021"

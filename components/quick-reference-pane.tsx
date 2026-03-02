@@ -173,6 +173,7 @@ export function QuickReferencePane({
 
             {selectedType === "image" && previewSrc && (
               <div className="rounded-xl border border-white/10 bg-white/5 p-2">
+                {/* eslint-disable-next-line @next/next/no-img-element -- Tauri file previews use local file URLs that next/image cannot optimize. */}
                 <img src={previewSrc} alt={selectedEntry.title} className="h-auto w-full rounded-lg object-contain" />
               </div>
             )}

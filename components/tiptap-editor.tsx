@@ -41,15 +41,16 @@ import History from "@tiptap/extension-history"
 import Heading from "@tiptap/extension-heading"
 import TextAlign from "@tiptap/extension-text-align"
 import { TextStyle } from "@tiptap/extension-text-style"
-import FontSize from "tiptap-fontsize-extension" // Updated import
 import Placeholder from "@tiptap/extension-placeholder"
-import { CommentMark, WordCount, ListExtensions, TabIndent, PageBreak } from "./tiptap-extensions"
+import { CommentMark, WordCount, ListExtensions, TabIndent, PageBreak, FontSize } from "./tiptap-extensions"
 import { createCommentId, type EditorCommentDraft } from "@/lib/comment-utils"
 
 interface TiptapEditorProps {
   selectedNode: string
   initialContent?: string
+  fontSize?: string
   onContentChange?: (content: string) => void
+  onFontSizeChange?: (fontSize: string) => void
   onCommentCreate?: (comment: EditorCommentDraft) => void
   compactMode?: boolean
 }
@@ -60,6 +61,25 @@ const PAPER_MARGIN = 72 // 0.75 inches * 96 DPI
 
 // Default font size
 const DEFAULT_FONT_SIZE = "16"
+
+const normalizeFontSizeValue = (value: unknown): string => {
+  if (typeof value !== "string") return DEFAULT_FONT_SIZE
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isFinite(parsed)) return DEFAULT_FONT_SIZE
+  return String(Math.min(36, Math.max(10, parsed)))
+}
+
+const countWordsFromHtml = (html?: string): number => {
+  if (!html) return 0
+  return html
+    .replace(/<[^>]*>/g, " ")
+    .split(/\s+/)
+    .filter(Boolean).length
+}
+
+const normalizeHtmlForSync = (html?: string): string => {
+  return (html || "").replace(/\s+/g, " ").trim()
+}
 
 type SlashCommandId = "text" | "heading1" | "heading2" | "bulletList" | "orderedList" | "pageBreak"
 
@@ -133,12 +153,21 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
 ]
 
-export function TiptapEditor({ selectedNode, initialContent, onContentChange, onCommentCreate, compactMode = false }: TiptapEditorProps) {
+export function TiptapEditor({
+  selectedNode,
+  initialContent,
+  fontSize: controlledFontSize,
+  onContentChange,
+  onFontSizeChange,
+  onCommentCreate,
+  compactMode = false,
+}: TiptapEditorProps) {
   const [mounted, setMounted] = useState(false)
   const { resolvedTheme } = useTheme()
   const isDark = resolvedTheme === "dark"
   const [papers, setPapers] = useState<number[]>([0]) // Start with one paper
-  const [fontSize, setFontSize] = useState<string>(DEFAULT_FONT_SIZE)
+  const [toolbarFontSize, setToolbarFontSize] = useState<string>(normalizeFontSizeValue(controlledFontSize))
+  const [wordCountDisplay, setWordCountDisplay] = useState(0)
   const editorRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const [showSaveNotification, setShowSaveNotification] = useState(false)
@@ -149,6 +178,11 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange, on
   const [findMatches, setFindMatches] = useState<FindMatch[]>([])
   const [activeFindMatchIndex, setActiveFindMatchIndex] = useState(0)
   const findInputRef = useRef<HTMLInputElement>(null)
+  const shouldRefocusAfterFontChangeRef = useRef(false)
+  const preferredTypingFontSizeRef = useRef<string>(normalizeFontSizeValue(controlledFontSize))
+  const lastEditorSelectionRef = useRef<{ from: number; to: number } | null>(null)
+  const lastSyncedNodeRef = useRef<string>("")
+  const lastEmittedContentRef = useRef("")
 
   useEffect(() => {
     setMounted(true)
@@ -170,7 +204,7 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange, on
         types: ["heading", "paragraph"],
       }),
       TextStyle,
-      FontSize, // The community extension has a different API
+      FontSize,
       WordCount,
       TabIndent,
       PageBreak,
@@ -181,29 +215,36 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange, on
         placeholder: "Write something amazing here",
         emptyEditorClass: "is-editor-empty",
         emptyNodeClass: "is-node-empty",
+        showOnlyCurrent: false,
       }),
     ],
     content: initialContent || "",
     onUpdate: ({ editor }) => {
-      // Update content height and recalculate pages
-      setTimeout(updatePagesBasedOnContent, 0)
-
-      // Notify parent component of content change
-      if (onContentChange && selectedNode) {
+      try {
+        // Update content height and recalculate pages
+        setTimeout(updatePagesBasedOnContent, 0)
         const content = editor.getHTML()
-        onContentChange(content)
+        lastEmittedContentRef.current = content
+        setWordCountDisplay(countWordsFromHtml(content))
+
+        // Notify parent component of content change
+        if (onContentChange && selectedNode) {
+          onContentChange(content)
+        }
+      } catch (error) {
+        console.error("Editor update failed:", error)
       }
     },
     editorProps: {
       attributes: {
         class: "prose prose-sm sm:prose lg:prose-lg xl:prose-2xl focus:outline-none font-serif editor-content",
-        style: `width: 100%; height: 100%; font-size: ${DEFAULT_FONT_SIZE}px;`, // Apply default font size here
+        style: "width: 100%; height: 100%;",
       },
     },
   })
 
   // Update pages based on content height
-  const updatePagesBasedOnContent = () => {
+  const updatePagesBasedOnContent = useCallback(() => {
     if (!editorRef.current || !editor) return
 
     const contentHeight = editorRef.current.scrollHeight
@@ -216,114 +257,128 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange, on
     if (pagesNeeded !== papers.length) {
       setPapers(Array.from({ length: pagesNeeded }, (_, i) => i))
     }
-  }
+  }, [editor, papers.length])
 
   useEffect(() => {
     if (!editor) return
 
-    // When selectedNode changes or initialContent changes
-    if (initialContent) {
-      // Only set content if it's different from current content
-      const currentContent = editor.getHTML()
+    const incomingContent = typeof initialContent === "string" ? initialContent : ""
+    const normalizedIncoming = normalizeHtmlForSync(incomingContent)
+    const normalizedCurrent = normalizeHtmlForSync(editor.getHTML())
+    const normalizedLastEmitted = normalizeHtmlForSync(lastEmittedContentRef.current)
+    const isNodeSwitch = lastSyncedNodeRef.current !== selectedNode
+    const isEchoFromLocalEdit = normalizedIncoming === normalizedLastEmitted
+    const shouldApplyExternalContent =
+      isNodeSwitch || (!isEchoFromLocalEdit && normalizedCurrent !== normalizedIncoming)
 
-      // Use a more robust comparison to avoid unnecessary updates
-      const normalizedCurrentContent = currentContent.replace(/\s+/g, " ").trim()
-      const normalizedInitialContent = initialContent.replace(/\s+/g, " ").trim()
-
-      if (normalizedCurrentContent !== normalizedInitialContent) {
-        // Use setTimeout to avoid React update cycles
-        setTimeout(() => {
-          editor.commands.setContent(initialContent)
-
-          // Update word count storage when content is loaded
-          const wordCount = initialContent
-            .replace(/<[^>]*>/g, " ")
-            .split(/\s+/)
-            .filter(Boolean).length
-          editor.storage.wordCount.wordCount = wordCount
-
-          // Check content height and update pages after content is loaded
-          setTimeout(updatePagesBasedOnContent, 100)
-        }, 0)
-      }
+    if (shouldApplyExternalContent) {
+      setTimeout(() => {
+        try {
+          ; (editor.commands as any).setContent(incomingContent, false)
+        } catch (error) {
+          console.error("Failed to sync editor content from state:", error)
+        }
+        setTimeout(updatePagesBasedOnContent, 100)
+      }, 0)
     } else {
-      // If no content is provided, set empty content to show placeholder
-      editor.commands.setContent("")
-
-        // Apply default font size to empty content
-        ; (editor.chain().focus() as any).setFontSize(DEFAULT_FONT_SIZE).run()
+      setTimeout(updatePagesBasedOnContent, 100)
     }
-  }, [selectedNode, initialContent, editor])
 
-  // Add this new useEffect to ensure word count is updated even if content hasn't changed
-  // Add this right after the previous useEffect:
-  useEffect(() => {
-    if (!editor || !initialContent) return
-
-    // Force update the word count when a document is loaded, even if content hasn't changed
-    const wordCount = initialContent
-      .replace(/<[^>]*>/g, " ")
-      .split(/\s+/)
-      .filter(Boolean).length
-
-    // Update the editor storage with the correct word count
-    editor.storage.wordCount.wordCount = wordCount
-
-    // Force a re-render to update the UI
-    editor.view.dispatch(editor.state.tr)
-
-    // Also update pages based on content
-    setTimeout(updatePagesBasedOnContent, 100)
-  }, [selectedNode, initialContent, editor])
+    const nextWordCount = countWordsFromHtml(incomingContent)
+    setWordCountDisplay(nextWordCount)
+    editor.storage.wordCount.wordCount = nextWordCount
+    lastSyncedNodeRef.current = selectedNode
+  }, [selectedNode, initialContent, editor, updatePagesBasedOnContent])
 
   // Update pages when editor is mounted
   useEffect(() => {
     if (editor && mounted) {
       setTimeout(updatePagesBasedOnContent, 100)
     }
-  }, [editor, mounted])
+  }, [editor, mounted, updatePagesBasedOnContent])
 
-  // Update font size when selection changes
+  useEffect(() => {
+    const normalized = normalizeFontSizeValue(controlledFontSize)
+    preferredTypingFontSizeRef.current = normalized
+    setToolbarFontSize((previous) => (previous === normalized ? previous : normalized))
+  }, [controlledFontSize])
+
   useEffect(() => {
     if (!editor) return
 
-    const handleSelectionUpdate = () => {
-      // Get the font size of the current selection
-      const attrs = editor.getAttributes("textStyle")
-      if (attrs.fontSize) {
-        // Remove 'px' from the fontSize value if it exists
-        const size = attrs.fontSize.toString().replace("px", "")
-        setFontSize(size)
+    const syncFontSizeFromSelection = () => {
+      const { from, to } = editor.state.selection
+      if (from !== to) {
+        lastEditorSelectionRef.current = { from, to }
+      }
+
+      const textStyleAttributes = editor.getAttributes("textStyle") as { fontSize?: string }
+      if (typeof textStyleAttributes.fontSize === "string" && textStyleAttributes.fontSize.trim()) {
+        const normalized = normalizeFontSizeValue(textStyleAttributes.fontSize.replace("px", ""))
+        preferredTypingFontSizeRef.current = normalized
+        setToolbarFontSize((previous) => (previous === normalized ? previous : normalized))
+        return
+      }
+
+      if (editor.isActive("heading", { level: 1 })) {
+        setToolbarFontSize("24")
+      } else if (editor.isActive("heading", { level: 2 })) {
+        setToolbarFontSize("20")
+      } else if (editor.isActive("heading", { level: 3 })) {
+        setToolbarFontSize("18")
       } else {
-        // If no fontSize attribute is found, check if we're in a heading
-        // and set an appropriate size based on heading level
-        if (editor.isActive("heading", { level: 1 })) {
-          setFontSize("24")
-        } else if (editor.isActive("heading", { level: 2 })) {
-          setFontSize("20")
-        } else if (editor.isActive("heading", { level: 3 })) {
-          setFontSize("18")
-        } else {
-          // Default size if nothing is selected or no size is applied
-          setFontSize(DEFAULT_FONT_SIZE)
-        }
+        const fallback = normalizeFontSizeValue(controlledFontSize)
+        setToolbarFontSize((previous) => (previous === fallback ? previous : fallback))
       }
     }
 
-    // Add event listener for selection changes
-    editor.on("selectionUpdate", handleSelectionUpdate)
-    // Also trigger when transaction is created (for when formatting is applied)
-    editor.on("transaction", handleSelectionUpdate)
-
-    // Initial check
-    handleSelectionUpdate()
+    editor.on("selectionUpdate", syncFontSizeFromSelection)
+    editor.on("transaction", syncFontSizeFromSelection)
+    syncFontSizeFromSelection()
 
     return () => {
-      // Remove event listeners when component unmounts
-      editor.off("selectionUpdate", handleSelectionUpdate)
-      editor.off("transaction", handleSelectionUpdate)
+      editor.off("selectionUpdate", syncFontSizeFromSelection)
+      editor.off("transaction", syncFontSizeFromSelection)
     }
+  }, [editor, controlledFontSize])
+
+  const applyStoredTypingFontSize = useCallback(
+    (fontSizePx: string) => {
+      if (!editor) return
+      const textStyleMark = editor.state.schema.marks.textStyle
+      if (!textStyleMark) return
+
+      const existingMarks = editor.state.storedMarks ?? editor.state.selection.$from.marks()
+      const nextMarks = [
+        ...existingMarks.filter((mark) => mark.type !== textStyleMark),
+        textStyleMark.create({ fontSize: fontSizePx }),
+      ]
+      editor.view.dispatch(editor.state.tr.setStoredMarks(nextMarks))
+    },
+    [editor],
+  )
+
+  const captureCurrentSelection = useCallback(() => {
+    if (!editor) return
+    const { from, to } = editor.state.selection
+    lastEditorSelectionRef.current = { from, to }
   }, [editor])
+
+  const refocusEditorForTyping = useCallback((preserveTypingStyle = false) => {
+    if (!editor) return
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        try {
+          editor.chain().focus().run()
+          if (preserveTypingStyle) {
+            applyStoredTypingFontSize(`${preferredTypingFontSizeRef.current}px`)
+          }
+        } catch (error) {
+          console.error("Failed to restore editor focus:", error)
+        }
+      })
+    })
+  }, [editor, applyStoredTypingFontSize])
 
   const closeSlashMenu = useCallback(() => {
     setSlashMenu(null)
@@ -408,10 +463,12 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange, on
       if (!editor || !slashMenu) return
 
       editor.chain().focus().deleteRange(slashMenu.range).run()
+      let shouldRestoreTypingSize = false
 
       switch (commandId) {
         case "text":
           editor.chain().focus().setParagraph().run()
+          shouldRestoreTypingSize = true
           break
         case "heading1":
           editor.chain().focus().setHeading({ level: 1 }).run()
@@ -421,19 +478,26 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange, on
           break
         case "bulletList":
           editor.chain().focus().toggleBulletList().run()
+          shouldRestoreTypingSize = true
           break
         case "orderedList":
           editor.chain().focus().toggleOrderedList().run()
+          shouldRestoreTypingSize = true
           break
         case "pageBreak":
           ; (editor.chain().focus() as any).setPageBreak().run()
+          shouldRestoreTypingSize = true
           break
+      }
+
+      if (shouldRestoreTypingSize) {
+        applyStoredTypingFontSize(`${preferredTypingFontSizeRef.current}px`)
       }
 
       closeSlashMenu()
       setTimeout(updatePagesBasedOnContent, 0)
     },
-    [editor, slashMenu, closeSlashMenu],
+    [editor, slashMenu, closeSlashMenu, updatePagesBasedOnContent, applyStoredTypingFontSize],
   )
 
   useEffect(() => {
@@ -710,8 +774,29 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange, on
   }
 
   const handleFontSizeChange = (size: string) => {
-    setFontSize(size)
-      ; (editor?.chain().focus() as any).setFontSize(size).run()
+    const normalized = normalizeFontSizeValue(size)
+    preferredTypingFontSizeRef.current = normalized
+    setToolbarFontSize(normalized)
+    shouldRefocusAfterFontChangeRef.current = true
+
+    onFontSizeChange?.(normalized)
+    if (!editor) return
+
+    try {
+      const savedSelection = lastEditorSelectionRef.current
+      if (savedSelection) {
+        ; (editor.chain().focus().setTextSelection(savedSelection) as any).setFontSize(`${normalized}px`).run()
+      } else {
+        ; (editor.chain().focus() as any).setFontSize(`${normalized}px`).run()
+      }
+
+      // Keep the selected size as the active typing style for subsequent input.
+      applyStoredTypingFontSize(`${normalized}px`)
+
+      setTimeout(updatePagesBasedOnContent, 0)
+    } catch (error) {
+      console.error("Failed to apply font size command:", error)
+    }
   }
 
   const handleSave = () => {
@@ -722,11 +807,20 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange, on
 
   const handleAddComment = () => {
     if (!editor || !selectedNode || !onCommentCreate) return
-    if (editor.state.selection.empty) return
+
+    const currentSelection = editor.state.selection
+    const savedSelection = lastEditorSelectionRef.current
+    const commentSelection =
+      !currentSelection.empty
+        ? { from: currentSelection.from, to: currentSelection.to }
+        : savedSelection && savedSelection.from !== savedSelection.to
+          ? savedSelection
+          : null
+    if (!commentSelection) return
 
     const selectionText = editor.state.doc.textBetween(
-      editor.state.selection.from,
-      editor.state.selection.to,
+      commentSelection.from,
+      commentSelection.to,
       " ",
       " ",
     )
@@ -737,7 +831,8 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange, on
     if (!trimmedNote) return
 
     const commentId = createCommentId()
-    ;(editor.chain().focus() as any).setComment({ commentId }).run()
+    ;(editor.chain().focus().setTextSelection(commentSelection) as any).setComment({ commentId }).run()
+    lastEditorSelectionRef.current = commentSelection
     onCommentCreate({
       id: commentId,
       text: trimmedNote,
@@ -791,8 +886,9 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange, on
                       variant="ghost"
                       size="icon"
                       className={`${getToolbarButtonClass()} h-8 w-8`}
+                      onMouseDown={(event) => event.preventDefault()}
                       onClick={handleAddComment}
-                      disabled={editor?.state.selection.empty}
+                      disabled={!editor || !selectedNode || !onCommentCreate}
                     >
                       <MessageSquarePlus className="h-4 w-4" />
                     </Button>
@@ -980,11 +1076,28 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange, on
                 <TooltipTrigger asChild>
                   <div className="soft-hover-box flex items-center rounded-md px-1">
                     <Type className="h-4 w-4 mr-1" />
-                    <Select value={fontSize} onValueChange={handleFontSizeChange}>
+                    <Select
+                      value={toolbarFontSize}
+                      onValueChange={handleFontSizeChange}
+                      onOpenChange={(open) => {
+                        if (open) {
+                          captureCurrentSelection()
+                          return
+                        }
+                        if (!shouldRefocusAfterFontChangeRef.current) return
+                        shouldRefocusAfterFontChangeRef.current = false
+                        refocusEditorForTyping(true)
+                      }}
+                    >
                       <SelectTrigger className="soft-hover-box h-8 w-16 border-none bg-transparent px-2 shadow-none focus:ring-0 focus:ring-offset-0">
                         <SelectValue placeholder="Size" />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent
+                        onCloseAutoFocus={(event) => {
+                          if (!shouldRefocusAfterFontChangeRef.current) return
+                          event.preventDefault()
+                        }}
+                      >
                         <SelectItem value="10">10</SelectItem>
                         <SelectItem value="12">12</SelectItem>
                         <SelectItem value="14">14</SelectItem>
@@ -1013,8 +1126,9 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange, on
                     variant="ghost"
                     size="icon"
                     className={`${getToolbarButtonClass()} h-8 w-8`}
+                    onMouseDown={(event) => event.preventDefault()}
                     onClick={handleAddComment}
-                    disabled={editor?.state.selection.empty}
+                    disabled={!editor || !selectedNode || !onCommentCreate}
                   >
                     <MessageSquarePlus className="h-4 w-4" />
                   </Button>
@@ -1165,10 +1279,10 @@ export function TiptapEditor({ selectedNode, initialContent, onContentChange, on
         {!compactMode && (
           <div className="flex items-center justify-between border-t border-white/10 p-2 text-sm text-muted-foreground">
             <div className="flex items-center space-x-3">
-              <span>{editor?.storage.wordCount.wordCount || 0} words</span>
+              <span>{wordCountDisplay} words</span>
               <span className="text-muted-foreground">•</span>
               <span title="Based on standard manuscript format (275 words per page)">
-                ~{Math.ceil((editor?.storage.wordCount.wordCount || 0) / 275)} pages
+                ~{Math.ceil(wordCountDisplay / 275)} pages
               </span>
             </div>
             {/* Removed keyboard shortcut indicators */}

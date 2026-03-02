@@ -37,3 +37,6 @@ next-env.d.ts
 
 # Tauri
 /src-tauri/target/
+
+# local safety snapshots
+/snapshots/

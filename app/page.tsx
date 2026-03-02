@@ -3,7 +3,7 @@
 import type React from "react"
 
 import { useState, useEffect, useRef } from "react"
-import { List, Settings, FileText, Save, FolderOpen, Pencil, Check, X, Printer, Maximize, Minimize, Rows3, Target, BookOpen } from "lucide-react"
+import { List, Settings, FileText, Save, FolderOpen, Pencil, Check, X, Printer, Maximize, Minimize, Rows3, Target, BookOpen, ChevronLeft, ChevronRight } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { TiptapEditor } from "@/components/tiptap-editor"
 import { Outliner } from "@/components/outliner"
@@ -126,6 +126,17 @@ const applySnapshotTriggerToDocuments = (
   return { documents: nextDocuments, changed: true }
 }
 
+const findNodeById = (nodes: TreeNode[], nodeId: string): TreeNode | null => {
+  for (const node of nodes) {
+    if (node.id === nodeId) return node
+    if (node.children?.length) {
+      const found = findNodeById(node.children, nodeId)
+      if (found) return found
+    }
+  }
+  return null
+}
+
 const clampNumber = (value: number, min: number, max: number): number => {
   if (!Number.isFinite(value)) return min
   return Math.min(max, Math.max(min, Math.round(value)))
@@ -207,9 +218,12 @@ const plainTextToHtml = (value: string): string => {
   return paragraphs.map((line) => `<p>${line}</p>`).join("")
 }
 
+const INSPECTOR_WIDTH_REM = 24
+
 export default function Dashboard() {
   const [viewMode, setViewMode] = useState<"document" | "flow" | "outliner" | "targets">("document")
   const [focusMode, setFocusMode] = useState(false)
+  const [inspectorOpen, setInspectorOpen] = useState(false)
   const [selectedNode, setSelectedNode] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
   const { theme, setTheme } = useTheme()
@@ -236,9 +250,25 @@ export default function Dashboard() {
   const [sessionStartWordCount, setSessionStartWordCount] = useState(0)
   const [quickReferenceOpen, setQuickReferenceOpen] = useState(true)
   const [quickReferenceNodeId, setQuickReferenceNodeId] = useState<string | null>(null)
+  const lastViewModeRef = useRef(viewMode)
   const bootstrappedProjectRef = useRef(false)
   const previousProjectWordCountRef = useRef(0)
   const lastPersistedThemeRef = useRef<AppTheme | null>(null)
+  const lastPersistedFontSizeRef = useRef<string | null>(null)
+  const saveInProgressRef = useRef(false)
+  const pendingAutoSaveRef = useRef(false)
+  const pendingManualSaveRef = useRef(false)
+  const applyProjectToStateRef = useRef<(project: QuillProject, filePath: string | null, preferredNodeId?: string | null) => void>(() => {})
+  const createWorkspaceProjectRef = useRef<(name?: string) => Promise<{ project: QuillProject; filePath: string }>>(
+    async () => {
+      throw new Error("Workspace project creator is not initialized.")
+    },
+  )
+  const openProjectFromPathRef = useRef<(filePath: string) => Promise<void>>(async () => {})
+  const handleNewProjectRef = useRef<() => Promise<void>>(async () => {})
+  const handleOpenProjectFileRef = useRef<() => Promise<void>>(async () => {})
+  const handleSaveProjectRef = useRef<(isAutoSave?: boolean) => Promise<void>>(async () => {})
+  const handleSaveProjectAsRef = useRef<() => Promise<void>>(async () => {})
   const menuActionsRef = useRef({
     newProject: () => {},
     openProject: () => {},
@@ -286,9 +316,9 @@ export default function Dashboard() {
         setTheme(preferredTheme)
         lastPersistedThemeRef.current = preferredTheme
 
-        if (prefs.fontSize) {
-          setFontSize(prefs.fontSize)
-        }
+        const preferredFontSize = normalizeFontSizeValue(prefs.fontSize)
+        setFontSize(preferredFontSize)
+        lastPersistedFontSizeRef.current = preferredFontSize
       } catch (error) {
         console.error("Failed to load preferences:", error)
       } finally {
@@ -319,6 +349,24 @@ export default function Dashboard() {
   }, [preferencesLoaded, theme])
 
   useEffect(() => {
+    if (!preferencesLoaded) return
+
+    const normalized = normalizeFontSizeValue(fontSize)
+    if (fontSize !== normalized) {
+      setFontSize(normalized)
+      return
+    }
+
+    if (lastPersistedFontSizeRef.current === normalized) return
+
+    updatePreference("fontSize", normalized).catch((error) => {
+      console.error("Failed to persist font size preference:", error)
+    })
+
+    lastPersistedFontSizeRef.current = normalized
+  }, [preferencesLoaded, fontSize])
+
+  useEffect(() => {
     if (startupMessage) {
       setStartupMessageDismissed(false)
     }
@@ -347,6 +395,21 @@ export default function Dashboard() {
 
   const normalizeProjectName = (value: unknown): string => {
     return typeof value === "string" && value.trim() ? value.trim() : "Untitled Project"
+  }
+
+  const normalizeFontSizeValue = (value: unknown): string => {
+    if (typeof value !== "string") return "16"
+    const parsed = Number.parseInt(value, 10)
+    if (!Number.isFinite(parsed)) return "16"
+    return String(Math.min(36, Math.max(10, parsed)))
+  }
+
+  const sanitizeProjectFileNameBase = (value: string): string => {
+    return value.replace(/[\\/:*?"<>|]/g, " ").replace(/\s+/g, " ").trim() || "Untitled Project"
+  }
+
+  const isUntitledProjectFileName = (value: string): boolean => {
+    return /^untitled project(?: \d+)?\.quill$/i.test(value.trim())
   }
 
   const normalizeFilePath = (value: string): string => {
@@ -420,17 +483,6 @@ export default function Dashboard() {
     return firstDocument
   }
 
-  const findNodeById = (nodes: TreeNode[], nodeId: string): TreeNode | null => {
-    for (const node of nodes) {
-      if (node.id === nodeId) return node
-      if (node.children?.length) {
-        const found = findNodeById(node.children, nodeId)
-        if (found) return found
-      }
-    }
-    return null
-  }
-
   const createDocumentForNode = (node: TreeNode, settings: ProjectSettings): DocumentData => {
     const now = new Date().toISOString()
     const isResearchNode = node.sectionType === "research"
@@ -496,10 +548,11 @@ export default function Dashboard() {
     if (normalizedProject.settings.theme) {
       setTheme(normalizeTheme(normalizedProject.settings.theme))
     }
-    if (normalizedProject.settings.fontSize) {
-      setFontSize(normalizedProject.settings.fontSize)
-    }
+    const normalizedFontSize = normalizeFontSizeValue(normalizedProject.settings.fontSize)
+    setFontSize(normalizedFontSize)
+    lastPersistedFontSizeRef.current = normalizedFontSize
   }
+  applyProjectToStateRef.current = applyProjectToState
 
   const ensureDirectoryExists = async (path: string) => {
     if (!window.__TAURI__?.fs) return
@@ -548,6 +601,7 @@ export default function Dashboard() {
     await addRecentProject(newProject.metadata.name, candidatePath)
     return { project: newProject, filePath: candidatePath }
   }
+  createWorkspaceProjectRef.current = createWorkspaceProject
 
   const openProjectFromPath = async (filePath: string) => {
     if (!window.__TAURI__?.fs) {
@@ -561,10 +615,9 @@ export default function Dashboard() {
     if (project.settings.theme) {
       await updatePreference("theme", normalizeTheme(project.settings.theme))
     }
-    if (project.settings.fontSize) {
-      await updatePreference("fontSize", project.settings.fontSize)
-    }
+    await updatePreference("fontSize", normalizeFontSizeValue(project.settings.fontSize))
   }
+  openProjectFromPathRef.current = openProjectFromPath
 
   const handleNewProject = async () => {
     setStartupMessage(null)
@@ -584,6 +637,7 @@ export default function Dashboard() {
     applyProjectToState(newProject, null)
     showProjectSavedNotification()
   }
+  handleNewProjectRef.current = handleNewProject
 
   const handleOpenProjectFile = async () => {
     if (isTauri) {
@@ -624,6 +678,7 @@ export default function Dashboard() {
       fileInputRef.current.click()
     }
   }
+  handleOpenProjectFileRef.current = handleOpenProjectFile
 
   // Handle file selection (for browser fallback)
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -666,7 +721,7 @@ export default function Dashboard() {
           if (lastProjectPath) {
             const exists = await window.__TAURI__.fs.exists(lastProjectPath)
             if (exists) {
-              await openProjectFromPath(lastProjectPath)
+              await openProjectFromPathRef.current(lastProjectPath)
               if (!cancelled) {
                 setStartupMessage(null)
               }
@@ -674,9 +729,9 @@ export default function Dashboard() {
             }
           }
 
-          const { project, filePath } = await createWorkspaceProject()
+          const { project, filePath } = await createWorkspaceProjectRef.current()
           if (!cancelled) {
-            applyProjectToState(project, filePath)
+            applyProjectToStateRef.current(project, filePath)
             if (lastProjectPath) {
               setStartupMessage(`Could not find your previously opened project at ${lastProjectPath}. A new workspace project was created.`)
             } else {
@@ -688,16 +743,16 @@ export default function Dashboard() {
 
         const newProject = createEmptyProject("Untitled Project")
         if (!cancelled) {
-          applyProjectToState(newProject, null)
+          applyProjectToStateRef.current(newProject, null)
           setStartupMessage(null)
         }
       } catch (error) {
         console.error("Failed to bootstrap project:", error)
         if (isTauri && window.__TAURI__?.fs && window.__TAURI__?.path) {
           try {
-            const { project, filePath } = await createWorkspaceProject()
+            const { project, filePath } = await createWorkspaceProjectRef.current()
             if (!cancelled) {
-              applyProjectToState(project, filePath)
+              applyProjectToStateRef.current(project, filePath)
               setStartupMessage("Could not restore your last project. A new workspace project was created instead.")
             }
             return
@@ -708,7 +763,7 @@ export default function Dashboard() {
 
         const fallbackProject = createEmptyProject("Untitled Project")
         if (!cancelled) {
-          applyProjectToState(fallbackProject, null)
+          applyProjectToStateRef.current(fallbackProject, null)
           setStartupMessage("Could not restore your last project. A new project has been created instead.")
         }
       } finally {
@@ -731,12 +786,12 @@ export default function Dashboard() {
     if (!currentProject || !mounted) return
 
     // Create a timeout to debounce saves
-    const timer = setTimeout(() => {
-      handleSaveProject(true) // Pass true to indicate it's an auto-save (silent)
+    const timer = window.setTimeout(() => {
+      void handleSaveProjectRef.current(true) // Pass true to indicate it's an auto-save (silent)
     }, 3000)
 
-    return () => clearTimeout(timer)
-  }, [treeData, documents, theme, fontSize, projectName, projectSettings])
+    return () => window.clearTimeout(timer)
+  }, [treeData, documents, theme, fontSize, projectName, projectSettings, currentProject, mounted])
 
   useEffect(() => {
     if (!currentProject || !mounted) return
@@ -760,14 +815,7 @@ export default function Dashboard() {
     return () => {
       window.clearInterval(timer)
     }
-  }, [
-    currentProject,
-    mounted,
-    projectSettings.snapshotSettings.enabled,
-    projectSettings.snapshotSettings.autoOnInterval,
-    projectSettings.snapshotSettings.intervalMinutes,
-    projectSettings.snapshotSettings.maxSnapshotsPerDocument,
-  ])
+  }, [currentProject, mounted, projectSettings.snapshotSettings])
 
   useEffect(() => {
     if (!currentProject || !mounted) return
@@ -799,6 +847,17 @@ export default function Dashboard() {
   // Replace the handleSaveProject function with this updated version
   // isAutoSave flag prevents showing the success notification when saving in the background
   const handleSaveProject = async (isAutoSave = false) => {
+    if (saveInProgressRef.current) {
+      if (isAutoSave) {
+        pendingAutoSaveRef.current = true
+      } else {
+        pendingManualSaveRef.current = true
+      }
+      return
+    }
+
+    saveInProgressRef.current = true
+
     try {
       let documentsForSave = documents
       if (!isAutoSave && projectSettings.snapshotSettings.enabled && projectSettings.snapshotSettings.autoOnManualSave) {
@@ -832,6 +891,31 @@ export default function Dashboard() {
       // If we don't have a path, we fall back to saveProjectZip which triggers a native Save As dialog or browser download.
       if (isTauri && projectFilePath) {
         try {
+          let targetPath = projectFilePath
+          if (!isAutoSave && window.__TAURI__?.path && window.__TAURI__?.fs) {
+            const currentFileName = getFileNameFromPath(projectFilePath)
+            const safeProjectFileBase = sanitizeProjectFileNameBase(normalizeProjectName(updatedProject.metadata.name))
+            const isProjectNameUntitled = /^untitled project$/i.test(safeProjectFileBase)
+
+            if (isUntitledProjectFileName(currentFileName) && !isProjectNameUntitled) {
+              const separatorIndex = Math.max(projectFilePath.lastIndexOf("/"), projectFilePath.lastIndexOf("\\"))
+              const parentDirectory = separatorIndex >= 0 ? projectFilePath.slice(0, separatorIndex) : ""
+              let candidatePath = parentDirectory
+                ? await window.__TAURI__.path.join(parentDirectory, `${safeProjectFileBase}.quill`)
+                : `${safeProjectFileBase}.quill`
+              let suffix = 2
+
+              while (candidatePath !== projectFilePath && await window.__TAURI__.fs.exists(candidatePath)) {
+                candidatePath = parentDirectory
+                  ? await window.__TAURI__.path.join(parentDirectory, `${safeProjectFileBase} ${suffix}.quill`)
+                  : `${safeProjectFileBase} ${suffix}.quill`
+                suffix += 1
+              }
+
+              targetPath = candidatePath
+            }
+          }
+
           const zip = new JSZip()
           zip.file("project.json", JSON.stringify(updatedProject, null, 2))
 
@@ -841,8 +925,12 @@ export default function Dashboard() {
             compressionOptions: { level: 6 },
           })
 
-          await window.__TAURI__.fs.writeBinaryFile(projectFilePath, zipData)
-          console.log(`Auto-saved project silently to ${projectFilePath}`)
+          await window.__TAURI__.fs.writeBinaryFile(targetPath, zipData)
+          if (targetPath !== projectFilePath) {
+            setProjectFilePath(targetPath)
+            await addRecentProject(updatedProject.metadata.name, targetPath)
+          }
+          console.log(`Auto-saved project silently to ${targetPath}`)
           clearAutosaveBackup()
 
         } catch (error) {
@@ -899,8 +987,20 @@ export default function Dashboard() {
       if (!isAutoSave) {
         alert("Failed to save project. Please try again.")
       }
+    } finally {
+      saveInProgressRef.current = false
+
+      if (pendingManualSaveRef.current || pendingAutoSaveRef.current) {
+        const shouldRunManualSave = pendingManualSaveRef.current
+        pendingManualSaveRef.current = false
+        pendingAutoSaveRef.current = false
+        window.setTimeout(() => {
+          void handleSaveProjectRef.current(!shouldRunManualSave)
+        }, 0)
+      }
     }
   }
+  handleSaveProjectRef.current = handleSaveProject
 
   const handleSaveProjectAs = async () => {
     try {
@@ -917,13 +1017,14 @@ export default function Dashboard() {
       setCurrentProject(updatedProject)
 
       if (isTauri && window.__TAURI__?.dialog?.save && window.__TAURI__?.fs?.writeBinaryFile) {
-        const suggestedName = `${normalizeProjectName(updatedProject.metadata.name)}.quill`
+        const suggestedName = `${sanitizeProjectFileNameBase(normalizeProjectName(updatedProject.metadata.name))}.quill`
         const selectedPath = await window.__TAURI__.dialog.save({
           filters: [{ name: "Quill Project", extensions: ["quill"] }],
           defaultPath: suggestedName,
         })
 
         if (!selectedPath) return
+        const normalizedSavePath = selectedPath.toLowerCase().endsWith(".quill") ? selectedPath : `${selectedPath}.quill`
 
         const zip = new JSZip()
         zip.file("project.json", JSON.stringify(updatedProject, null, 2))
@@ -934,9 +1035,9 @@ export default function Dashboard() {
           compressionOptions: { level: 6 },
         })
 
-        await window.__TAURI__.fs.writeBinaryFile(selectedPath, zipData)
-        await addRecentProject(updatedProject.metadata.name, selectedPath)
-        setProjectFilePath(selectedPath)
+        await window.__TAURI__.fs.writeBinaryFile(normalizedSavePath, zipData)
+        await addRecentProject(updatedProject.metadata.name, normalizedSavePath)
+        setProjectFilePath(normalizedSavePath)
         clearAutosaveBackup()
         showProjectSavedNotification()
         return
@@ -955,6 +1056,7 @@ export default function Dashboard() {
       alert(`Failed to save project: ${error instanceof Error ? error.message : "Unknown error"}`)
     }
   }
+  handleSaveProjectAsRef.current = handleSaveProjectAs
 
   const handleSaveProjectName = () => {
     if (editedProjectName.trim()) {
@@ -1556,22 +1658,31 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
+    if (viewMode === "flow" && lastViewModeRef.current !== "flow") {
+      setQuickReferenceOpen(false)
+    }
+    lastViewModeRef.current = viewMode
+  }, [viewMode])
+
+  useEffect(() => {
     menuActionsRef.current = {
-      newProject: handleNewProject,
+      newProject: () => {
+        void handleNewProjectRef.current()
+      },
       openProject: () => {
-        void handleOpenProjectFile()
+        void handleOpenProjectFileRef.current()
       },
       saveProject: () => {
-        void handleSaveProject(false)
+        void handleSaveProjectRef.current(false)
       },
       saveProjectAs: () => {
-        void handleSaveProjectAs()
+        void handleSaveProjectAsRef.current()
       },
       openSettings: () => {
         setSettingsOpen(true)
       },
     }
-  }, [handleNewProject, handleOpenProjectFile, handleSaveProject, handleSaveProjectAs])
+  }, [])
 
   useEffect(() => {
     if (!isTauri || typeof window === "undefined") return
@@ -1613,6 +1724,7 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
+    if (viewMode !== "document") return
     if (!selectedNode) return
     const selectedTreeNode = findNodeById(treeData, selectedNode)
     if (!selectedTreeNode || selectedTreeNode.type !== "document") return
@@ -1621,14 +1733,42 @@ export default function Dashboard() {
       setQuickReferenceNodeId(selectedNode)
       setQuickReferenceOpen(true)
     }
-  }, [selectedNode, treeData, documents])
+  }, [selectedNode, treeData, documents, viewMode])
 
   if (!preferencesLoaded || !isProjectBootstrapComplete || !currentProject) {
     return <div className={cn("app-shell app-workspace", isTauri && "tauri-desktop")} />
   }
 
   const selectedTreeNode = selectedNode ? findNodeById(treeData, selectedNode) : null
+  const isDocumentSelected = selectedTreeNode?.type === "document"
+  const inspectorVisible = !focusMode && inspectorOpen
+  const quickReferenceVisible = !focusMode && (viewMode === "document" || viewMode === "flow") && quickReferenceOpen
   const flowDocuments = collectFlowDocuments(treeData, documents)
+  const quickReferenceParentId = selectedTreeNode?.type === "folder" ? selectedTreeNode.id : null
+
+  const quickReferencePane = (
+    <div
+      className={cn(
+        "min-h-0 overflow-hidden transition-[width,opacity,transform] duration-200 ease-out",
+        quickReferenceVisible
+          ? "w-[22rem] min-w-[20rem] max-w-[26rem] opacity-100 translate-x-0"
+          : "w-0 min-w-0 max-w-0 opacity-0 translate-x-2 pointer-events-none",
+      )}
+    >
+      <div className="h-full w-[22rem]">
+        <QuickReferencePane
+          treeData={treeData}
+          documents={documents}
+          selectedReferenceId={quickReferenceNodeId}
+          onSelectReference={setQuickReferenceNodeId}
+          onCreateResearchNote={() => handleCreateResearchItem(quickReferenceParentId, "note")}
+          onCreateResearchLink={() => handleCreateResearchItem(quickReferenceParentId, "link")}
+          onImportResearchFiles={() => void handleImportResearchFiles(quickReferenceParentId)}
+          onUpdateResearchItem={handleResearchItemUpdate}
+        />
+      </div>
+    </div>
+  )
 
   // Sidebar content
   const sidebarContent = (
@@ -1652,19 +1792,23 @@ export default function Dashboard() {
         {viewMode === "document" && (
           <div className="flex-1 min-h-0 min-w-0 flex overflow-hidden view-transition entered">
             <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
-              <TiptapEditor
-                selectedNode={selectedTreeNode?.type === "document" ? selectedNode || "" : ""}
-                onContentChange={(content) => {
-                  if (selectedNode && selectedTreeNode?.type === "document") {
-                    // Calculate word count from the HTML content
-                    const wordCount = content
-                      .replace(/<[^>]*>/g, " ") // Remove HTML tags
-                      .split(/\s+/) // Split by whitespace
-                      .filter(Boolean).length // Remove empty strings
+              {isDocumentSelected ? (
+                <TiptapEditor
+                  selectedNode={selectedNode || ""}
+                  fontSize={fontSize}
+                  onFontSizeChange={(nextSize) => {
+                    const normalized = normalizeFontSizeValue(nextSize)
+                    setFontSize((previous) => (previous === normalized ? previous : normalized))
+                  }}
+                  onContentChange={(content) => {
+                    if (!selectedNode) return
 
-                    // Use functional update to ensure we're working with latest state
+                    const wordCount = content
+                      .replace(/<[^>]*>/g, " ")
+                      .split(/\s+/)
+                      .filter(Boolean).length
+
                     setDocuments((prev) => {
-                      // Create a new document if it doesn't exist
                       if (!prev[selectedNode]) {
                         const node = findNodeById(treeData, selectedNode)
                         const defaults = node ? createDocumentForNode(node, projectSettings) : createDocumentForNode({
@@ -1686,7 +1830,6 @@ export default function Dashboard() {
                         }
                       }
 
-                      // Update existing document if content has changed
                       if (prev[selectedNode].content !== content) {
                         return {
                           ...prev,
@@ -1701,59 +1844,59 @@ export default function Dashboard() {
 
                       return prev
                     })
-                  }
-                }}
-                initialContent={selectedNode && selectedTreeNode?.type === "document" ? documents[selectedNode]?.content : undefined}
-                onCommentCreate={(draft) => {
-                  if (!selectedNode || selectedTreeNode?.type !== "document") return
-                  handleCreateDocumentComment(selectedNode, draft)
-                }}
-              />
+                  }}
+                  initialContent={selectedNode ? documents[selectedNode]?.content : undefined}
+                  onCommentCreate={(draft) => {
+                    if (!selectedNode) return
+                    handleCreateDocumentComment(selectedNode, draft)
+                  }}
+                />
+              ) : (
+                <div className="flex flex-1 min-h-0 items-center justify-center p-6">
+                  <div className="max-w-xl rounded-2xl border border-dashed border-white/20 bg-white/5 px-8 py-10 text-center shadow-sm">
+                    <p className="text-base font-semibold text-foreground">Select a document to start writing.</p>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      Folders organize your binder. Choose a paper node or create a new file to edit content.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {quickReferenceOpen && (
-              <div className="w-[22rem] min-w-[20rem] max-w-[26rem]">
-                <QuickReferencePane
-                  treeData={treeData}
-                  documents={documents}
-                  selectedReferenceId={quickReferenceNodeId}
-                  onSelectReference={setQuickReferenceNodeId}
-                  onCreateResearchNote={() => handleCreateResearchItem(selectedTreeNode?.type === "folder" ? selectedTreeNode.id : null, "note")}
-                  onCreateResearchLink={() => handleCreateResearchItem(selectedTreeNode?.type === "folder" ? selectedTreeNode.id : null, "link")}
-                  onImportResearchFiles={() => void handleImportResearchFiles(selectedTreeNode?.type === "folder" ? selectedTreeNode.id : null)}
-                  onUpdateResearchItem={handleResearchItemUpdate}
-                />
-              </div>
-            )}
+            {quickReferencePane}
           </div>
         )}
         {viewMode === "flow" && (
-          <div className="flex-1 min-h-0 flex flex-col overflow-hidden view-transition entered">
-            <FlowMode
-              documents={flowDocuments}
-              onDocumentChange={(documentId, content) => {
-                const wordCount = content
-                  .replace(/<[^>]*>/g, " ")
-                  .split(/\s+/)
-                  .filter(Boolean).length
+          <div className="flex-1 min-h-0 min-w-0 flex overflow-hidden view-transition entered">
+            <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
+              <FlowMode
+                documents={flowDocuments}
+                fontSize={fontSize}
+                onDocumentChange={(documentId, content) => {
+                  const wordCount = content
+                    .replace(/<[^>]*>/g, " ")
+                    .split(/\s+/)
+                    .filter(Boolean).length
 
-                setDocuments((prev) => {
-                  const existingDocument = prev[documentId]
-                  if (!existingDocument) return prev
-                  if (existingDocument.content === content) return prev
-                  return {
-                    ...prev,
-                    [documentId]: {
-                      ...existingDocument,
-                      content,
-                      wordCount,
-                      lastModified: new Date().toISOString(),
-                    },
-                  }
-                })
-              }}
-              onCommentCreate={handleCreateDocumentComment}
-            />
+                  setDocuments((prev) => {
+                    const existingDocument = prev[documentId]
+                    if (!existingDocument) return prev
+                    if (existingDocument.content === content) return prev
+                    return {
+                      ...prev,
+                      [documentId]: {
+                        ...existingDocument,
+                        content,
+                        wordCount,
+                        lastModified: new Date().toISOString(),
+                      },
+                    }
+                  })
+                }}
+                onCommentCreate={handleCreateDocumentComment}
+              />
+            </div>
+            {quickReferencePane}
           </div>
         )}
         {viewMode === "targets" && (
@@ -1786,12 +1929,12 @@ export default function Dashboard() {
       <div
         className="min-h-0 border-l border-white/10 transition-all duration-300 ease-in-out"
         style={{
-          width: focusMode ? "0px" : "18.5rem",
-          opacity: focusMode ? 0 : 1,
+          width: inspectorVisible ? `${INSPECTOR_WIDTH_REM}rem` : "0px",
+          opacity: inspectorVisible ? 1 : 0,
           overflow: "hidden",
         }}
       >
-        <div className="h-full min-h-0 w-[18.5rem] p-2 pl-3">
+        <div className="h-full min-h-0 p-2 pl-3" style={{ width: `${INSPECTOR_WIDTH_REM}rem` }}>
           <GlassPanel className="pane-surface h-full min-h-0 overflow-hidden rounded-2xl">
             <Inspector
               selectedNode={selectedNode || ""}
@@ -1981,14 +2124,28 @@ export default function Dashboard() {
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <GlassIconButton
-                        active={quickReferenceOpen}
+                        active={quickReferenceVisible}
+                        disabled={focusMode}
                         onClick={() => setQuickReferenceOpen((prev) => !prev)}
                         aria-label="Toggle quick reference pane"
                       >
                         <BookOpen className="h-4 w-4" />
                       </GlassIconButton>
                     </TooltipTrigger>
-                    <TooltipContent>Quick Reference</TooltipContent>
+                    <TooltipContent>{focusMode ? "Disabled in Focus Mode" : "Quick Reference"}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <GlassIconButton
+                        active={inspectorOpen && !focusMode}
+                        disabled={focusMode}
+                        onClick={() => setInspectorOpen((prev) => !prev)}
+                        aria-label="Toggle inspector pane"
+                      >
+                        {inspectorOpen && !focusMode ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+                      </GlassIconButton>
+                    </TooltipTrigger>
+                    <TooltipContent>{focusMode ? "Disabled in Focus Mode" : "Toggle Inspector"}</TooltipContent>
                   </Tooltip>
                   <Tooltip>
                     <TooltipTrigger asChild>

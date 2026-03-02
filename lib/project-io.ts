@@ -22,6 +22,9 @@ export interface SaveProjectResult {
 
 /* ---------- helpers ------------------------------------------------ */
 const toProjectJson = (data: unknown) => JSON.stringify(data, null, 2)
+const sanitizeProjectFileName = (value: string): string =>
+  value.replace(/[\\/:*?"<>|]/g, " ").replace(/\s+/g, " ").trim() || "Untitled Project"
+const ensureQuillExtension = (path: string): string => (path.toLowerCase().endsWith(".quill") ? path : `${path}.quill`)
 
 /* ---------- public API --------------------------------------------- */
 // Replace the saveProjectZip function with this enhanced version
@@ -39,7 +42,7 @@ export async function saveProjectZip(project: QuillProject): Promise<SaveProject
   // Get preferred directory from preferences
   const preferences = await loadPreferences()
   const preferredDirectory = preferences.projectDirectory
-  const filename = `${normalizedProject.metadata.name}.quill`
+  const filename = `${sanitizeProjectFileName(normalizedProject.metadata.name)}.quill`
 
   if (isTauri) {
     try {
@@ -58,24 +61,30 @@ export async function saveProjectZip(project: QuillProject): Promise<SaveProject
         if (!dirExists) {
           await window.__TAURI__.fs.createDir(preferredDirectory, { recursive: true })
         }
-        fullPath = `${preferredDirectory}/${filename}`
+        if (window.__TAURI__?.path?.join) {
+          fullPath = await window.__TAURI__.path.join(preferredDirectory, filename)
+        } else {
+          fullPath = `${preferredDirectory}/${filename}`
+        }
       } else {
         // Use Tauri's dialog to ask for save location
-        fullPath = (await window.__TAURI__.dialog.save({
+        const selected = await window.__TAURI__.dialog.save({
           filters: [{ name: "Quill Project", extensions: ["quill"] }],
           defaultPath: filename,
-        })) as string
+        })
+        fullPath = typeof selected === "string" ? ensureQuillExtension(selected) : ""
       }
 
       if (fullPath) {
         // Write the file using Tauri's fs API
-        await window.__TAURI__.fs.writeBinaryFile(fullPath, zipData)
-        console.log(`Project saved to ${fullPath}`)
+        const normalizedFullPath = ensureQuillExtension(fullPath)
+        await window.__TAURI__.fs.writeBinaryFile(normalizedFullPath, zipData)
+        console.log(`Project saved to ${normalizedFullPath}`)
 
         // Add to recent projects
-        await addRecentProject(normalizedProject.metadata.name, fullPath)
+        await addRecentProject(normalizedProject.metadata.name, normalizedFullPath)
 
-        return { success: true, filePath: fullPath }
+        return { success: true, filePath: normalizedFullPath }
       }
       return { success: false, filePath: null }
     } catch (error) {

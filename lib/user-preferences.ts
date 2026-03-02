@@ -46,19 +46,19 @@ function normalizeRecentProject(entry: unknown): RecentProject | null {
 
   const value = entry as Record<string, unknown>
 
-  let name = value.name
-  if (typeof name !== "string" && name && typeof name === "object") {
-    const nested = name as Record<string, unknown>
+  let normalizedName = typeof value.name === "string" ? value.name.trim() : ""
+  if (!normalizedName && value.name && typeof value.name === "object") {
+    const nested = value.name as Record<string, unknown>
     const nestedMetadata = nested.metadata as Record<string, unknown> | undefined
     if (typeof nestedMetadata?.name === "string") {
-      name = nestedMetadata.name
+      normalizedName = nestedMetadata.name.trim()
     } else if (typeof nested.name === "string") {
-      name = nested.name
+      normalizedName = nested.name.trim()
     }
   }
-  if (typeof name !== "string" || !name.trim()) {
+  if (!normalizedName) {
     const metadata = value.metadata as Record<string, unknown> | undefined
-    name = typeof metadata?.name === "string" ? metadata.name : "Untitled Project"
+    normalizedName = typeof metadata?.name === "string" ? metadata.name.trim() : "Untitled Project"
   }
 
   const path = typeof value.path === "string" ? value.path : ""
@@ -67,7 +67,7 @@ function normalizeRecentProject(entry: unknown): RecentProject | null {
   const lastModified = typeof value.lastModified === "string" ? value.lastModified : new Date().toISOString()
 
   return {
-    name: name.trim(),
+    name: normalizedName,
     path,
     lastModified,
   }

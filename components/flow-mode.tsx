@@ -12,11 +12,12 @@ export interface FlowModeDocument {
 
 interface FlowModeProps {
   documents: FlowModeDocument[]
+  fontSize?: string
   onDocumentChange: (documentId: string, content: string) => void
   onCommentCreate?: (documentId: string, comment: EditorCommentDraft) => void
 }
 
-export function FlowMode({ documents, onDocumentChange, onCommentCreate }: FlowModeProps) {
+export function FlowMode({ documents, fontSize, onDocumentChange, onCommentCreate }: FlowModeProps) {
   if (documents.length === 0) {
     return (
       <div className="flex h-full min-h-0 items-center justify-center bg-transparent p-8 text-center text-muted-foreground">
@@ -46,6 +47,7 @@ export function FlowMode({ documents, onDocumentChange, onCommentCreate }: FlowM
               <TiptapEditor
                 selectedNode={document.id}
                 initialContent={document.content}
+                fontSize={fontSize}
                 compactMode
                 onContentChange={(content) => onDocumentChange(document.id, content)}
                 onCommentCreate={(comment) => onCommentCreate?.(document.id, comment)}

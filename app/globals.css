@@ -599,7 +599,9 @@ body {
 }
 
 /* Alignment styles */
-.ProseMirror .is-editor-empty:first-child::before {
+.ProseMirror .is-editor-empty:first-child::before,
+.ProseMirror .is-node-empty:first-child::before,
+.ProseMirror .is-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;
   color: #aaa;
@@ -631,49 +633,6 @@ body {
   color: #1f2124;
 }
 
-.ProseMirror {
-  padding: 0;
-  outline: none;
-  line-height: 1.8;
-  min-height: 500px;
-  font-size: 16px;
-  /* Default font size */
-}
-
-.ProseMirror p {
-  margin-bottom: 1em;
-}
-
-.ProseMirror h1 {
-  font-size: 1.8em;
-  font-weight: bold;
-  margin-bottom: 0.5em;
-}
-
-.ProseMirror h2 {
-  font-size: 1.5em;
-  font-weight: bold;
-  margin-bottom: 0.5em;
-}
-
-.ProseMirror h3 {
-  font-size: 1.3em;
-  font-weight: bold;
-  margin-bottom: 0.5em;
-}
-
-.ProseMirror ul {
-  list-style-type: disc;
-  padding-left: 1.5em;
-  margin-bottom: 1em;
-}
-
-.ProseMirror ol {
-  list-style-type: decimal;
-  padding-left: 1.5em;
-  margin-bottom: 1em;
-}
-
 /* Paper-specific styles */
 .paper {
   background-color: #FAFAFA;
@@ -692,15 +651,6 @@ body {
   background-color: #e8dcc9;
   color: #2d2a24;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-}
-
-/* Fix for Tiptap editor in dark mode */
-.dark .ProseMirror {
-  color: #1f2124;
-}
-
-.muted-elegance .ProseMirror {
-  color: #2d2a24;
 }
 
 /* Tab indentation styles */
@@ -894,17 +844,6 @@ body {
 
 .transition-colors {
   transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out, border-color 0.2s ease-in-out;
-}
-
-/* Button hover animations */
-button:not(:disabled):hover {
-  transform: translateY(-1px);
-  transition: transform 0.2s ease-in-out;
-}
-
-button:not(:disabled):active {
-  transform: translateY(0);
-  transition: transform 0.1s ease-in-out;
 }
 
 /* Tree view animations */
@@ -1154,12 +1093,12 @@ button:not(:disabled):active {
 
 /* Paper animation for document view */
 .paper-animation {
-  transition: transform 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
+  transition: none;
 }
 
 .paper-animation:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  transform: none;
+  box-shadow: inherit;
 }
 
 /* Add these scrollbar styles at the end of the file */
@@ -1511,7 +1450,9 @@ button:not(:disabled):active {
 }
 
 /* Add custom styles for the TipTap placeholder */
-.ProseMirror p.is-editor-empty:first-child::before {
+.ProseMirror p.is-editor-empty:first-child::before,
+.ProseMirror p.is-node-empty:first-child::before,
+.ProseMirror p.is-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;
   color: #aaa;
@@ -1531,10 +1472,14 @@ button:not(:disabled):active {
 } */
 
 /* Theme-specific placeholder styles */
-.dark .ProseMirror p.is-editor-empty:first-child::before {
+.dark .ProseMirror p.is-editor-empty:first-child::before,
+.dark .ProseMirror p.is-node-empty:first-child::before,
+.dark .ProseMirror p.is-empty:first-child::before {
   color: #8a867f;
 }
 
-.muted-elegance .ProseMirror p.is-editor-empty:first-child::before {
+.muted-elegance .ProseMirror p.is-editor-empty:first-child::before,
+.muted-elegance .ProseMirror p.is-node-empty:first-child::before,
+.muted-elegance .ProseMirror p.is-empty:first-child::before {
   color: rgba(227, 181, 164, 0.8);
 }

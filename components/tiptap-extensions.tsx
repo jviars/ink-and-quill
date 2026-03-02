@@ -4,7 +4,6 @@ import { Extension, Mark, Node, mergeAttributes } from "@tiptap/core"
 import BulletList from "@tiptap/extension-bullet-list"
 import OrderedList from "@tiptap/extension-ordered-list"
 import ListItem from "@tiptap/extension-list-item"
-import { Plugin, PluginKey } from "@tiptap/pm/state"
 
 // Custom Tiptap extension for word count
 export const WordCount = Extension.create({
@@ -16,8 +15,8 @@ export const WordCount = Extension.create({
     }
   },
 
-  onUpdate({ editor }) {
-    const text = editor.getText()
+  onUpdate() {
+    const text = this.editor.getText()
     const words = text.trim().split(/\s+/).filter(Boolean)
     this.storage.wordCount = words.length
   },
@@ -27,55 +26,120 @@ export const WordCount = Extension.create({
   },
 })
 
-// Add animation to the TabIndent extension
+export const FontSize = Extension.create({
+  name: "fontSize",
+
+  addOptions() {
+    return {
+      types: ["textStyle"],
+    }
+  },
+
+  addGlobalAttributes() {
+    return [
+      {
+        types: this.options.types,
+        attributes: {
+          fontSize: {
+            default: null,
+            parseHTML: (element) => element.style.fontSize || null,
+            renderHTML: (attributes) => {
+              if (!attributes.fontSize) return {}
+              return {
+                style: `font-size: ${attributes.fontSize}`,
+              }
+            },
+          },
+        },
+      },
+    ]
+  },
+
+  addCommands() {
+    return {
+      setFontSize:
+        (fontSize: string) =>
+        ({ chain }: { chain: any }) => {
+          return chain().setMark("textStyle", { fontSize }).run()
+        },
+      unsetFontSize:
+        () =>
+        ({ chain }: { chain: any }) => {
+          return chain().setMark("textStyle", { fontSize: null }).removeEmptyTextStyle().run()
+        },
+    } as any
+  },
+})
+
 export const TabIndent = Extension.create({
   name: "tabIndent",
 
-  addProseMirrorPlugins() {
-    return [
-      new Plugin({
-        key: new PluginKey("tabIndent"),
-        props: {
-          handleKeyDown: (view, event) => {
-            // Check if the tab key was pressed
-            if (event.key === "Tab") {
-              // Prevent default tab behavior
-              event.preventDefault()
+  addKeyboardShortcuts() {
+    return {
+      Tab: () => {
+        if (this.editor.isActive("listItem")) {
+          const canSink = (this.editor.can() as any).sinkListItem?.("listItem") ?? false
+          if (canSink) {
+            return (this.editor.commands as any).sinkListItem("listItem")
+          }
+          return true
+        }
 
-              // Get the current selection
-              const { selection } = view.state
-              const { from, to } = selection
+        return this.editor.commands.insertContent("    ")
+      },
+      "Shift-Tab": () => {
+        if (!this.editor.isActive("listItem")) {
+          return false
+        }
 
-              // Check if we're at the start of a paragraph
-              const isAtStart = from === selection.$from.start()
+        const canLift = (this.editor.can() as any).liftListItem?.("listItem") ?? false
+        if (canLift) {
+          return (this.editor.commands as any).liftListItem("listItem")
+        }
+        return true
+      },
+      Backspace: () => {
+        if (!this.editor.isActive("listItem")) return false
 
-              if (isAtStart) {
-                // If at the start of a paragraph, add an indent with animation class
-                const tr = view.state.tr.insertText("\t")
-                view.dispatch(tr)
+        const { state } = this.editor
+        const { selection } = state
+        if (!selection.empty) return false
 
-                // Add animation class to the paragraph (handled by CSS)
-                const paragraph = view.dom.querySelector("p:has(.ProseMirror-trm)")
-                if (paragraph) {
-                  paragraph.classList.add("animate-indent")
-                  setTimeout(() => {
-                    paragraph.classList.remove("animate-indent")
-                  }, 300)
-                }
+        const atStartOfItem = selection.$from.parentOffset === 0
+        if (!atStartOfItem) return false
 
-                return true
-              } else {
-                // If not at the start, insert a tab character
-                const tr = view.state.tr.insertText("\t")
-                view.dispatch(tr)
-                return true
-              }
+        const currentText = selection.$from.parent.textContent.trim()
+        if (currentText.length > 0) return false
+
+        try {
+          let listItemDepth = -1
+          for (let depth = selection.$from.depth; depth > 0; depth -= 1) {
+            if (selection.$from.node(depth).type.name === "listItem") {
+              listItemDepth = depth
+              break
             }
-            return false
-          },
-        },
-      }),
-    ]
+          }
+
+          if (listItemDepth > 0) {
+            const listDepth = listItemDepth - 1
+            const hasPreviousSiblingItem = selection.$from.index(listDepth) > 0
+            if (hasPreviousSiblingItem) {
+              // Defer to ProseMirror's native backspace join behavior for non-first list items.
+              return false
+            }
+          }
+
+          const canLift = (this.editor.can() as any).liftListItem?.("listItem") ?? false
+          if (canLift) {
+            return (this.editor.commands as any).liftListItem("listItem")
+          }
+          return this.editor.chain().focus().clearNodes().run()
+        } catch (error) {
+          console.error("List backspace recovery failed:", error)
+          return false
+        }
+      },
+    }
   },
 })
 
@@ -97,10 +161,10 @@ export const PageBreak = Node.create({
     return {
       setPageBreak:
         () =>
-        ({ commands }) => {
+        ({ commands }: { commands: any }) => {
           return commands.insertContent({ type: this.name })
         },
-    }
+    } as any
   },
 })
 
@@ -139,12 +203,12 @@ export const CommentMark = Mark.create({
     return {
       setComment:
         (attributes: { commentId: string }) =>
-        ({ commands }) => {
+        ({ commands }: { commands: any }) => {
           return commands.setMark(this.name, attributes)
         },
       unsetComment:
         () =>
-        ({ commands }) => {
+        ({ commands }: { commands: any }) => {
           return commands.unsetMark(this.name)
         },
     } as any
